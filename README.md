@@ -22,9 +22,9 @@
 
 | 文件 | 核心内容 |
 |------|---------|
-| [00-JVM发展历程.md](./02-JVM虚拟机/00-JVM发展历程.md) | JVM家族发展史（Classic/Exact/HotSpot/JRockit/J9）、JDK时间线到JDK 23、主流JVM对比（HotSpot/OpenJ9/GraalVM/Azul）、关键技术演进总结 |
+| [00-JVM发展历程.md](./02-JVM虚拟机/00-JVM发展历程.md) | JVM家族发展史（Classic/Exact/HotSpot/JRockit/J9）、JDK时间线到JDK 23、主流JVM对比（HotSpot/OpenJ9/GraalVM/Azul）、关键技术演进总结、各JVM/GC名称由来 |
 | [01-内存模型.md](./02-JVM虚拟机/01-内存模型.md) | 运行时数据区、堆/栈/方法区细节、永久代vs元空间、HotSpot对象探秘（创建/布局/访问）、TLAB、String.intern()变化 |
-| 02-垃圾回收.md | 垃圾判定算法、GC算法（标记清除、标记整理、复制）、垃圾回收器、GC Roots、引用类型 |
+| [02-垃圾收集器与内存分配策略.md](./02-JVM虚拟机/02-垃圾收集器与内存分配策略.md) | 引用计数/可达性分析、三色标记法与漏标问题、四大GC算法、7大垃圾收集器详解（Serial/ParNew/Parallel/CMS/G1/ZGC）、ZGC三大黑科技、G1 Region分区、内存分配与回收策略、面试题整理 |
 | 03-类加载机制.md | 类加载过程、类加载器、双亲委派模型、打破双亲委派 |
 | 04-性能调优.md | 常用调优工具、JVM参数、OOM问题排查、CPU飙高排查、常用调优策略 |
 

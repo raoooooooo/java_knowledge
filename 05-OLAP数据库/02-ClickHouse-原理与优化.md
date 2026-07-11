@@ -236,6 +236,9 @@ WHERE timestamp >= '2024-01-01'
 #### 什么是稀疏索引？
 
 > ClickHouse 用的是 **稀疏索引**，不是 MySQL 的稠密索引！
+>
+> ⚠️ **面试高频大坑：稀疏索引需要手动创建吗？**
+> **答案：不需要！稀疏索引是 MergeTree 天生自带、自动创建、自动维护的！**
 
 **稠密索引（MySQL）：** 每一行数据都有索引条目
 ```
@@ -247,6 +250,45 @@ WHERE timestamp >= '2024-01-01'
 ```
 
 **稀疏索引（ClickHouse）：** 每 index_granularity 行才有一个索引条目
+
+---
+
+#### 稀疏索引怎么来的？（面试必问）
+
+**一句话：你写 ORDER BY 的那一刻，稀疏索引就有了！**
+
+```sql
+CREATE TABLE test.logs (
+    timestamp DateTime,
+    hostname String,
+    message String
+) ENGINE = MergeTree()
+ORDER BY (hostname, timestamp);  -- ← 这个就决定了稀疏索引！
+```
+
+**生成逻辑：**
+1. 数据按 `ORDER BY` 排序键有序写入磁盘
+2. 每 `index_granularity` 行（默认 8192 行），取第一行排序键的值
+3. 这些值存到 `primary.idx` 文件里 → 这就是稀疏索引！
+
+**你不能手动创建稀疏索引，只能在建表时配置：**
+
+| 配置项 | 作用 |
+|--------|------|
+| `ORDER BY (col1, col2...)` | 决定索引包含哪些列 |
+| `PRIMARY KEY col1` | 可单独指定索引列（默认 = ORDER BY） |
+| `index_granularity = 8192` | 调整采样粒度（行数） |
+
+---
+
+#### 和跳数索引的区别（别搞混！）
+
+| 索引类型 | 怎么创建 | 作用 |
+|---------|---------|------|
+| **稀疏索引（主键索引）** | 自动创建，ORDER BY 决定 | 定位 granule，每查必用 |
+| **跳数索引（Skipping Index）** | `CREATE INDEX` 手动创建 | 额外过滤，跳过整个 granule |
+
+> 只有跳数索引才需要 `CREATE INDEX` 手动建！别搞混了！
 ```
 granule 1 (行1-8192) → offset 0
 granule 2 (行8193-16384) → offset 10000
@@ -377,7 +419,116 @@ ORDER BY (a, b, c)
 
 ---
 
-### 4.5 跳数索引（Skipping Index）
+### 4.5 倒排索引（Inverted Index）⭐ 2024 新特性
+
+> ClickHouse 23.8+ 版本正式支持倒排索引！专门解决全文搜索问题。
+
+#### 什么是倒排索引？
+
+和 ES 的倒排索引原理一样：**单词 → 文档列表**
+
+```
+日志内容：
+"error: connection timeout"
+"error: disk full"
+"info: request success"
+
+倒排索引：
+error    → [行1, 行2]
+connection → [行1]
+timeout  → [行1]
+disk     → [行2]
+full     → [行2]
+info     → [行3]
+request  → [行3]
+success  → [行3]
+```
+
+查询 `message LIKE '%error%'` 时，直接查倒排索引，瞬间定位行号，不需要扫全表！
+
+---
+
+#### 怎么创建倒排索引？
+
+```sql
+-- 建表时创建
+CREATE TABLE logs (
+    timestamp DateTime,
+    message String,
+    INDEX idx_message message TYPE inverted
+) ENGINE = MergeTree()
+ORDER BY timestamp;
+
+-- 已有表追加索引
+ALTER TABLE logs ADD INDEX idx_message message TYPE inverted;
+
+-- 物化索引（让已有数据生效）
+ALTER TABLE logs MATERIALIZE INDEX idx_message;
+```
+
+---
+
+#### 高级配置
+
+```sql
+-- 带参数的倒排索引
+INDEX idx_message message TYPE inverted(
+    GRANULARITY = 1,           -- 索引粒度
+    TOKENIZER = 'default',     -- 分词器：default/chinese
+    MAX_TOKEN_LENGTH = 64,     -- 最大词长
+    MIN_TOKEN_LENGTH = 2       -- 最小词长（过滤单字）
+)
+```
+
+**中文分词支持：**
+```sql
+-- 需要 24.3+ 版本
+INDEX idx_message message TYPE inverted(TOKENIZER = 'chinese')
+```
+
+---
+
+#### 支持的查询
+
+倒排索引会自动加速这些查询：
+
+| 查询语句 | 是否加速 |
+|---------|---------|
+| `message = 'error'` | ✅ 精确匹配 |
+| `message LIKE '%error%'` | ✅ 模糊包含 |
+| `message IN ('error', 'warn')` | ✅ IN 列表 |
+| `hasToken(message, 'error')` | ✅ 专用函数 |
+| `multiSearchAny(message, ['error', 'warn'])` | ✅ 多关键词 |
+
+---
+
+#### 和跳数索引（ngrambf）的对比
+
+| 特性 | 倒排索引 inverted | ngram 布隆过滤器 |
+|------|-----------------|----------------|
+| 查询速度 | 极快（精确匹配词） | 快（过滤 granule） |
+| 假阳性 | 0%，完全精确 | 有（布隆过滤器特性） |
+| 索引大小 | 大（存所有词） | 小（只存哈希） |
+| LIKE '%a%' | 支持（但 a 是单字可能效果一般） | 支持 |
+| 多关键词 AND/OR | ✅ 完美支持 | ⚠️ 不支持组合逻辑 |
+| 中文分词 | ✅ 内置中文分词 | ❌ 不支持 |
+
+---
+
+#### 最佳实践
+
+| 场景 | 推荐 |
+|------|------|
+| 日志全文搜索，关键词查询 | ✅ 优先用倒排索引 |
+| 简单关键词过滤，索引越小越好 | 可以用 ngram bf |
+| 需要中文分词搜索 | 必须用倒排索引 |
+| 组合逻辑查询（A AND B NOT C） | 倒排索引 |
+
+> ⚠️ 注意：倒排索引索引大小可能是原字段的 50%~100%，比跳数索引大很多，只给真正需要全文搜索的列建！
+
+---
+
+### 4.6 跳数索引（Skipping Index）
 
 #### 什么是跳数索引？
 

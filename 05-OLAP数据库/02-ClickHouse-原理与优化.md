@@ -620,6 +620,65 @@ ORDER BY score DESC;
 
 ---
 
+#### 另一个重要区别：搜索宽容度（面试加分项）
+
+**ES 会做模糊匹配，尽量给你返回点什么；ClickHouse 精确匹配，搜不到就是空。**
+
+---
+
+##### Elasticsearch 的「用户友好型」搜索
+
+ES 有多层容错机制：
+
+| ES 机制 | 效果 |
+|--------|------|
+| **Fuzzy 模糊查询** | 搜 `helo` → 自动匹配 `hello`（编辑距离 ≤ 2） |
+| **拼写纠错建议** | 完全没匹配到，会提示「你是不是想搜 hello？」 |
+| **同义词扩展** | 搜「手机」→ 匹配「移动电话、智能手机」 |
+| **词根还原** | 搜 `running` → 匹配 `run / ran` |
+
+> **ES 哲学：用户体验至上，永远不想让你看到空结果页。**
+
+---
+
+##### ClickHouse 的「机器友好型」搜索
+
+**ClickHouse 是 100% 精确匹配！**
+
+| 场景 | ClickHouse 行为 |
+|------|----------------|
+| 搜 `helo` | ❌ 就是没有，不会帮你匹配 `hello` |
+| 搜大写 `ERROR` | ❌ 不会匹配小写 `error`（需手动开 CASE_INSENSITIVE） |
+| 搜单数 `error` | ❌ 不会匹配复数 `errors` |
+| 完全没匹配到 | ✅ 干干净净返回空，不会给任何「你是不是想搜」建议 |
+
+> **ClickHouse 哲学：精确性和性能至上，你搜什么就是什么，从不自作主张。**
+
+---
+
+##### 能不能在 CK 里实现类似效果？能，但要自己做
+
+**方案1：大小写不敏感索引**
+```sql
+INDEX idx_message message TYPE inverted(CASE_INSENSITIVE = 1)
+```
+
+**方案2：查询层做降级匹配**
+```sql
+-- 先精确匹配，没结果再用编辑距离模糊匹配
+WITH 'helo' AS keyword
+SELECT * FROM logs WHERE hasToken(message, keyword)
+UNION ALL
+SELECT * FROM logs
+WHERE 0 = (SELECT count() FROM logs WHERE hasToken(message, keyword))
+  AND editDistanceUTF8(message, keyword) <= 2  -- 允许错2个字符
+LIMIT 100;
+```
+
+**方案3：架构层封装** → 先搜 CK，没结果再调用 ES 做拼写纠错，再搜一次。
+
+---
+
 ### 4.6 跳数索引（Skipping Index）
 
 #### 什么是跳数索引？

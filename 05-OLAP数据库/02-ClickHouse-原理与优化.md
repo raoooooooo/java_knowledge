@@ -567,6 +567,59 @@ INDEX idx_message message TYPE inverted(TOKENIZER = 'chinese')
 
 ---
 
+#### 倒排索引支持相关性打分吗？（面试高频）
+
+**答案：原生不支持 TF-IDF / BM25 相关性打分！**
+
+**核心原因：**
+- ClickHouse 的倒排索引定位是 **「布尔过滤器」**，只回答「这行包含这个词吗？」（有/没有）
+- 它不是 **「搜索引擎排名器」**，不算「这行和这个词相关程度是多少分」
+- BM25 需要存词频、文档频率、字段长度归一化因子，索引大小会翻倍
+
+---
+
+##### 进阶：手动实现简单打分（工作中够用）
+
+虽然没有内置 BM25，但可以用字符串函数手动实现：
+
+**方案1：按命中关键词数量打分**
+```sql
+SELECT
+    message,
+    multiSearchAnyCount(message, ['error', 'timeout', 'disk']) AS score
+FROM logs
+WHERE hasAnyToken(message, ['error', 'timeout', 'disk'])
+ORDER BY score DESC;
+```
+
+**方案2：加权打分（不同词权重不同）**
+```sql
+SELECT
+    message,
+    -- error 权重 5 分，timeout 3 分，disk 2 分
+    if(message LIKE '%error%', 5, 0) +
+    if(message LIKE '%timeout%', 3, 0) +
+    if(message LIKE '%disk%', 2, 0) AS score
+FROM logs
+WHERE hasAnyToken(message, ['error', 'timeout', 'disk'])
+ORDER BY score DESC;
+```
+
+---
+
+##### 和 ES 专业打分的差距
+
+| 特性 | Elasticsearch | ClickHouse 手动实现 |
+|------|--------------|-------------------|
+| TF-IDF / BM25 | ✅ 原生精确算法 | ❌ 没有 |
+| 字段长度归一化 | ✅ 短字段匹配权重更高 | ❌ 没有 |
+| IDF 逆文档频率 | ✅ 稀有词匹配权重更高 | ❌ 没有 |
+| 短语匹配加分 | ✅ 连续命中的词加分 | ❌ 没有 |
+| 自定义权重 | ✅ 灵活配置 | ⚠️ 可以手写 IF 实现 |
+| 打分性能 | ✅ 索引阶段预计算 | ⚠️ 查询时计算，数据量大了慢 |
+
+---
+
 ### 4.6 跳数索引（Skipping Index）
 
 #### 什么是跳数索引？

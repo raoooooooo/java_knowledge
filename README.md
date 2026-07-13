@@ -82,6 +82,7 @@
 |------|---------|
 | [01-Kafka入门.md](./06-中间件/01-Kafka入门.md) | 初识Kafka、消息队列与JMS规范、生产者-消费者模式、消息中间件对比、ZooKeeper与KRaft模式、快速上手 |
 | [02-Kafka基础.md](./06-中间件/02-Kafka基础.md) | 集群部署与启动（Broker/Controller选举）、创建主题（Topic/Partition/Replica/Leader-Follower/Log）、生产消息（三组件/发送方式/分区/ACK/幂等与事务/传输语义）、存储消息（文件格式/稀疏索引/HW-LEO-ISR/数据一致性）、消费消息（消费者组/Coordinator/分配策略/Offset管理） |
+| [03-Kafka进阶.md](./06-中间件/03-Kafka进阶.md) | Controller选举与防脑裂(epoch)、Broker上下线与Leader重选举、数据偏移量定位(Segment/稀疏索引/跳跃表)、Topic删除、日志清理与压缩(delete/compact/墓碑)、页缓存、零拷贝(sendfile/mmap)、顺序写日志、KRaft模式 |
 
 ---
 

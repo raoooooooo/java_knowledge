@@ -22,3 +22,9 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# 参考资料（docx/pdf 等原始资料）不提交，仅本地学习参考
+*.docx
+*.doc
+*.pdf
+~$*

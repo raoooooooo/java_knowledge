@@ -80,10 +80,8 @@
 
 | 文件 | 核心内容 |
 |------|---------|
-| 01-Redis.md | 数据结构、持久化（RDB/AOF）、过期策略、内存淘汰、集群、缓存问题、分布式锁 |
-| 02-MQ进阶.md | Kafka/RocketMQ架构、生产/消费模型、高可用、消息可靠性、性能优化 |
-| 03-Elasticsearch.md | 索引原理、倒排索引、文档CRUD、查询DSL、集群、分片、性能优化 |
-| 04-Nginx.md | 反向代理、负载均衡、动静分离、高可用、配置、性能优化 |
+| [01-Kafka入门.md](./06-中间件/01-Kafka入门.md) | 初识Kafka、消息队列与JMS规范、生产者-消费者模式、消息中间件对比、ZooKeeper与KRaft模式、快速上手 |
+| [02-Kafka基础.md](./06-中间件/02-Kafka基础.md) | 集群部署与启动（Broker/Controller选举）、创建主题（Topic/Partition/Replica/Leader-Follower/Log）、生产消息（三组件/发送方式/分区/ACK/幂等与事务/传输语义）、存储消息（文件格式/稀疏索引/HW-LEO-ISR/数据一致性）、消费消息（消费者组/Coordinator/分配策略/Offset管理） |
 
 ---
 

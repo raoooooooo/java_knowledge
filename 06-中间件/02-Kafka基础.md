@@ -1019,16 +1019,176 @@ Follower B 重启后，不再直接截断到 HW，而是：
 - 默认 **50 个分区**，`hash(consumerGroupId) % 50` 决定存哪个分区
 - Key = `consumerGroupId + topic + 分区号`，Value = offset，只保留最新
 
-**消费者事务（隔离级别）**
-- `read_committed`：只读已提交事务的数据（默认）
-- `read_uncommitted`：未提交也能读
+**消费者事务（重点）**
 
-**消费数据服务端流程**
-1. 消费者发 `FetchRequest`
-2. ReplicaManager 确定分区
-3. 判定首选副本（2.4+ 支持 Follower 读，省跨机房流量）
-4. LogSegment 读取
-5. **零拷贝**（FileChannel）从内核直接传数据，提效
+**① 消费者端的事务为什么弱？**
+
+> 对于单独的 Consumer，事务保证比较弱，核心难点在于：**"消费数据"和"提交偏移量"是两个动作，难以原子绑定**。
+
+- 消费者通过偏移量访问消息，但不同的数据文件（日志段）生命周期不同
+- 同一事务的消息可能因重启、日志清理被删除
+- 无法保证"提交的偏移量"对应的消息被"精确消费一次"
+
+**两种出错场景**：
+
+| 做法 | 风险 |
+|------|------|
+| 先提交 offset 再处理业务 | 处理失败但 offset 已提交 -> **数据丢失** |
+| 先处理业务再提交 offset | 处理成功但提交失败/重启 -> **重复消费** |
+
+**② 消费端如何做事务（原子绑定）**
+
+> 一般做法：把**数据消费过程 + 偏移量提交过程**进行**原子性绑定**。
+
+- 数据处理完了，必须保证偏移量正确提交，才能进行下一步操作
+- 若偏移量提交失败，数据恢复到处理之前的效果（回滚）
+- Kafka 提供的方式：将"消费 + 提交 offset"放到**同一个事务**里（配合生产者事务机制）
+
+**③ 与生产者事务的关系：隔离级别**
+
+> 生产者开启事务后，消费者消费的数据也会受到限制。默认消费者**看不到**生产者未提交的数据，需通过隔离级别控制。
+
+| 隔离级别 | 含义 | 是否默认 |
+|---------|------|---------|
+| `read_committed` | 只读"已提交事务成功"的数据，未提交的看不到 | ✅ 默认 |
+| `read_uncommitted` | 已提交 + 未提交事务的数据都能读到 | 否 |
+
+**④ 完整代码示例**
+
+```java
+Map<String, Object> paramMap = new HashMap<>();
+paramMap.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:9092");
+paramMap.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+paramMap.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+paramMap.put(ConsumerConfig.GROUP_ID_CONFIG, "test");
+
+// 隔离级别：已提交读，只读取已提交事务成功的数据（默认，可省略）
+// paramMap.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_committed");
+
+// 隔离级别：未提交读，已提交和未提交事务的数据都能读到
+paramMap.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, "read_uncommitted");
+
+KafkaConsumer<String, String> c = new KafkaConsumer<>(paramMap);
+c.subscribe(Collections.singletonList("test"));
+while (true) {
+    ConsumerRecords<String, String> poll = c.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : poll) {
+        System.out.println(record.value());
+    }
+}
+```
+
+> 💡 **一句话**：消费者事务弱在"消费与提交 offset 难原子绑定"，做法是**原子绑定消费+提交**；生产者开事务后，消费者用 `read_committed`(默认) 只看已提交数据，`read_uncommitted` 连未提交也看。
+
+**⑤ 生产者事务 vs 消费者事务（对比）**
+
+> 生产者事务管"**发消息**"，消费者事务管"**读消息**"，两者是一对呼应关系。
+
+| 对比项 | 生产者事务 | 消费者事务 |
+|--------|-----------|-----------|
+| **解决什么** | 多条消息要么全成功可见、要么全失败不可见 | 消费处理 + 提交offset 原子绑定，不丢不重 |
+| **作用方向** | 发送端（写） | 接收端（读） |
+| **核心机制** | `transactional.id` + 事务协调器 + Marker | 消费+提交offset原子绑定 + 隔离级别 |
+| **是否需要 PID** | 需要（绑定 PID 跨会话稳定） | 不直接涉及 PID |
+| **隔离级别** | 不涉及（生产者只管提交/中止） | `read_committed`(默认) / `read_uncommitted` |
+| **强弱** | 相对强（有完整事务协调器机制） | 较弱（单Consumer难精确一次消费） |
+| **典型代码** | `initTransactions/begin/commit/abort` | `isolation.level` + 原子提交offset |
+| **所在章节** | 见 1.3 节"事务" | 见本节"消费者事务" |
+
+**两者如何配合（端到端 Exactly Once）**
+
+```text
+  生产者事务(1.3节)                 消费者事务(本节)
+       │                                  │
+       ▼                                  ▼
+  开事务发多条消息               开事务：消费 + 提交offset 原子绑定
+  (未提交时消费者看不到)                    │
+       │                                  ▼
+       ▼                            read_committed: 只读已提交消息
+  commit: 发Marker让消息可见                 │
+                                          ▼
+                                   端到端 Exactly Once: 消息不丢不重
+```
+
+> 💡 **一句话**：生产者事务保证"发出去的消息要么全可见要么全不可见"，消费者事务保证"读到的消息处理与提交offset原子绑定"。两者配合 + 隔离级别 `read_committed`，才能实现端到端的 Exactly Once。
+
+
+**消费数据服务端流程（重点）**
+
+> 消费者一般只设定订阅的主题名称，那 Broker 端是怎么"找到数据并返回给消费者"的？下面是服务端拉取数据的完整流程。
+
+**完整流程图**
+
+```text
+  消费者 Consumer                          Broker
+      │                                      │
+      │  1. 发送 FETCH 请求                   │
+      │  (带: 要消费的分区、当前offset、拉多少)│
+      ├─────────────────────────────────────►│
+      │                                      │
+      │              2. KafkaApis 路由         │
+      │                 (按请求标记FETCH分发)    │
+      │                                      │
+      │              3. ReplicaManager 处理    │
+      │                 - 确定拉取的分区        │
+      │                 - 校验权限/合法性       │
+      │                                      │
+      │              4. 判定"首选副本"        │
+      │                 (读Leader还是Follower)  │
+      │                                      │
+      │              5. LogSegment 读取数据    │
+      │                 - 按offset定位日志段     │
+      │                 - 用索引快速查找        │
+      │                                      │
+      │              6. 零拷贝传输              │
+      │                 (FileChannel从内核直传)  │
+      │                                      │
+      │  ◄─── 返回消息批次 + HW/LEO ──────────┤
+      │                                      │
+  消费者收到数据，处理后再poll下一次
+```
+
+**分步详解**
+
+**① 消费者发送 FETCH 请求**
+- 消费者通过 `poll()` 向 Broker 发送 `FetchRequest` 拉取数据的请求
+- 请求里带上：要消费的分区、当前消费到的 offset（从哪开始拉）、最多拉多少（`fetch.max.bytes`）、超时时间
+- 这就是"消费者主动拉取（pull）"，不是 Broker 推送
+
+**② KafkaApis 路由请求**
+- Broker 收到请求后，由 `KafkaApis`（应用处理接口）根据请求的标记 `FETCH` 分发
+- KafkaApis 是 Broker 内部的"请求调度器"，所有请求先经过它判断类型再转给对应处理器
+
+**③ ReplicaManager 副本管理器处理**
+- 确定消费者要拉取的是哪个分区
+- 校验：分区是否存在、消费者是否有权限、offset 是否合法（在 [LSO, HW) 范围内）
+- 校验通过后交给分区对象去读数据
+
+**④ 判定首选副本（2.4版本重要变化）**
+- **2.4 之前**：数据的读写都走 **Leader 副本**（Follower 不参与读）
+- **2.4 之后**：支持 **Follower 副本读取**，称为"**首选副本（Preferred Replica）**"
+- 目的：跨机房/跨数据中心场景下，**就近从本地机房的副本读数据**，省跨机房流量、降延迟
+- 不是所有 Follower 都能读，只有"首选"的那个（通常是和消费者同机房的副本）
+
+**⑤ LogSegment 读取数据**
+- 底层用 `LogSegment` 对象操作，对应具体的某个日志段文件
+- 按 offset 定位：先二分查找定位到哪个日志段（文件名是起始offset），再用稀疏索引快速定位到日志段内的物理位置
+- 读取出一个消息批次返回
+
+**⑥ 零拷贝传输（性能关键）**
+- 传统方式：磁盘 -> 内核缓冲 -> 用户空间 -> Socket缓冲 -> 网卡（4次拷贝、4次上下文切换）
+- Kafka 用 NIO 的 `FileChannel` + `transferTo` 实现**零拷贝**：数据从**操作系统内核**直接传到网卡，**不经过用户空间**
+- 好处：减少2次数据拷贝和上下文切换，大幅提升消费读取效率
+- 这也是 Kafka 高吞吐的重要原因之一
+
+**返回的数据里还有什么**
+
+Broker 除了返回消息数据，还会返回一些偏移量信息：
+- **HW（高水位）**：消费者据此知道自己能读到的最大范围，避免读到未提交数据
+- **LEO**：Leader 的日志末端，消费者可据此判断消费进度（Lag = LEO - 已消费offset）
+
+> 💡 **一句话总结**：消费者 `poll` 发 FETCH 请求 -> Broker 的 KafkaApis 路由 -> ReplicaManager 校验分区 -> 判定首选副本(2.4+可读Follower) -> LogSegment 按 offset 读数据 -> **零拷贝**直接从内核传给消费者，同时返回 HW/LEO。
+
 
 ---
 

@@ -127,11 +127,7 @@
 | [01-Docker基础与核心概念.md](./11-云原生/01-Docker基础与核心概念.md) | Docker概述、容器vs虚拟机、三大核心概念（镜像/容器/仓库）、架构、底层技术（Namespace/Cgroups/Union FS）、写时复制机制、常见面试题 |
 | [02-Docker常用命令与实践.md](./11-云原生/02-Docker常用命令与实践.md) | 镜像/容器/网络/数据卷常用命令详解、docker run流程、exec vs attach、排错方法、资源限制、生产环境最佳实践 |
 | [03-Dockerfile详解与镜像构建.md](./11-云原生/03-Dockerfile详解与镜像构建.md) | Dockerfile 14大指令详解、多阶段构建、.dockerignore、镜像优化、构建缓存原理、常见面试题 |
-| 04-Docker网络.md | 网络驱动（bridge/host/overlay/macvlan/none）、DNS解析、端口映射、跨主机通信、网络安全、CNI |
-| 05-Docker存储.md | Storage Driver、Volume、Bind Mount、tmpfs、存储驱动选型、持久化方案、数据备份恢复 |
-| 06-Docker安全.md | 容器安全风险、用户权限、Capability、Seccomp、AppArmor、镜像安全扫描、运行时安全、最佳实践 |
-| 07-Docker Compose.md | Compose 配置文件、多容器编排、服务发现、网络、卷管理、常用命令、生产环境部署 |
-| 08-Kubernetes基础.md | K8s 架构、核心概念（Pod/Node/Namespace/Service/Deployment）、对象管理、常用命令、资源清单 |
+| [04-Kubernetes基础.md](./11-云原生/04-Kubernetes基础.md) | K8s概述与Docker关系、集群架构(控制平面apiserver/etcd/scheduler/controller-manager+工作节点kubelet/kube-proxy)、声明式API与控制循环、核心资源(Pod/Label/ReplicaSet/Deployment/Service/Namespace/StatefulSet/DaemonSet/Ingress/ConfigMap/PV-PVC)、kubectl命令与资源清单、高频面试题 |
 
 ---
 

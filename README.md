@@ -127,7 +127,7 @@
 | [01-Docker基础与核心概念.md](./11-云原生/01-Docker基础与核心概念.md) | Docker概述、容器vs虚拟机、三大核心概念（镜像/容器/仓库）、架构、底层技术（Namespace/Cgroups/Union FS）、写时复制机制、常见面试题 |
 | [02-Docker常用命令与实践.md](./11-云原生/02-Docker常用命令与实践.md) | 镜像/容器/网络/数据卷常用命令详解、docker run流程、exec vs attach、排错方法、资源限制、生产环境最佳实践 |
 | [03-Dockerfile详解与镜像构建.md](./11-云原生/03-Dockerfile详解与镜像构建.md) | Dockerfile 14大指令详解、多阶段构建、.dockerignore、镜像优化、构建缓存原理、常见面试题 |
-| [04-Kubernetes基础.md](./11-云原生/04-Kubernetes基础.md) | K8s概述与Docker关系、集群架构(控制平面apiserver/etcd/scheduler/controller-manager+工作节点kubelet/kube-proxy)、声明式API与控制循环、核心资源(Pod/Label/ReplicaSet/Deployment/Service/Namespace/StatefulSet/DaemonSet/Ingress/ConfigMap/PV-PVC)、kubectl命令与资源清单、高频面试题 |
+| [04-Kubernetes基础.md](./11-云原生/04-Kubernetes基础.md) | K8s概述与Docker关系、集群架构(控制平面apiserver/etcd/scheduler/controller-manager+工作节点kubelet/kube-proxy)、声明式API与控制循环、核心资源(Node/Pod/Label/ReplicaSet/Deployment/Service/Namespace/StatefulSet/DaemonSet/Ingress/ConfigMap/PV-PVC)、DaemonSet详解(每节点一个Pod+日志采集挂载/var/log+监控node-exporter+分层监控)、Service IP与端口关联(PodIP/ClusterIP/NodeIP三类IP+port/targetPort/nodePort三段链路)、节点亲和性原理(硬/软亲和性+调度器Filter/Score两阶段+与Taint/Pod亲和对比)、资源管理(requests/limits原理+Cgroups CPU限流与内存OOM+QoS三等级)、应用部署配置全景(资源清单/ConfigMap-Secret/RBAC/PVC/Ingress+Helm)、kubectl命令与资源清单、高频面试题(含Operator原理=CRD+自定义控制器) |
 
 ---
 

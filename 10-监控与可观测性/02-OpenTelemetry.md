@@ -70,13 +70,46 @@ Trace（订单请求全链路）:
 ### Context Propagation（上下文传播）
 
 - 把 `traceId` 跨服务、跨进程透传下去的机制，是**链路能串起来的关键**。
-- 通常通过 HTTP 头（W3C `traceparent`）或消息中间件 header 携带。
 - 没有它：A 调 B，A 和 B 各自产生独立的 Span，**连不成一条链**，分布式追踪就失效了。
 
+**传播靠什么？--W3C Trace Context 规范**
+
+上下文传播不是 OTel 自己发明的，它遵循 **W3C Trace Context 标准**，让不同语言、不同厂商的系统能互相识别链路上下文。核心是约定两个 HTTP 请求头：
+
+| 头 | 作用 |
+|---|---|
+| `traceparent` | 传链路核心信息（traceId / spanId / 采样标志），OTel 默认用它 |
+| `tracestate` | 传厂商扩展信息（多厂商并存时，允许多套链路系统共存） |
+
+**`traceparent` 格式**（面试可能要会读）：
+
 ```
-服务A --(请求头带traceparent: traceId=xxx)--> 服务B
-       服务B解析出traceId，续上同一条链
+traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+              ↑  ↑────────────────────────────── ↑────────────────── ↑
+            版本          traceId(32位hex)            spanId(16位hex)    采样标志
+           (00)         16字节，全链路唯一           8字节，当前Span       (01=采样)
 ```
+
+- **traceId**：16 字节（32 位十六进制），全链路唯一，整条 Trace 不变。
+- **spanId**：8 字节（16 位十六进制），当前这一跳的 Span 标识，每跳不同。
+- **采样标志（trace-flags）**：`01` 表示该链路被采样（要上报），`00` 表示不采样。
+
+```
+服务A(创建Trace，生成traceId，写入请求头traceparent)
+   │  traceparent: 00-<traceId>-<A的spanId>-01
+   ▼
+服务B(从请求头解析出traceparent，取出traceId续上链路，
+      再用自己的spanId替换，继续往下传)
+   │  traceparent: 00-<同一个traceId>-<B的spanId>-01
+   ▼
+服务C(同上……)
+```
+
+**传播载体**：HTTP 用请求头，RPC/gRPC 用 metadata，消息队列（Kafka/RabbitMQ）用消息 header。OTel 的各种 instrumenter 自动注入和解析这些头，业务代码通常无感。
+
+> ⚠️ **关键认知**：W3C Trace Context 是行业共识标准，正因如此，OTel 采集的链路能被 Jaeger/Zipkin/SkyWalking 等任意遵循该标准的后端识别。这是 OTel"标准化、解耦"理念的底层体现。
+
+**与 Baggage 的区别**：`traceparent` 传的是 OTel 内部的 traceId（用于串联链路）；`Baggage` 用独立的 `baggage` 请求头传业务自定义 KV（如 userId、租户ID），各服务可读写，详见下文 Baggage 一节。
 
 ### Resource（资源）
 
@@ -178,8 +211,11 @@ Trace（订单请求全链路）:
 - Trace 是完整链路，Span 是其中一段操作，多个 Span 组成一个 Trace，有父子关系。
 - Span 含：操作名、起止时间、状态码、属性、事件、父SpanId、traceId。
 
-### 5. Context Propagation 是什么？为什么重要？
-- 跨服务透传 traceId 的机制（通过 W3C traceparent 头）。没有它，各服务 Span 各自孤立，连不成完整链路，分布式追踪就失效了。
+### 5. Context Propagation 是什么？为什么重要？W3C 规范？
+- 跨服务透传 traceId 的机制，是链路能串联的关键。
+- 遵循 **W3C Trace Context 标准**，核心是 `traceparent` 请求头，格式为 `版本-traceId-spanId-采样标志`。traceId 全链路唯一，spanId 每跳变化，采样标志位决定是否上报。
+- 传播载体：HTTP 用请求头、gRPC 用 metadata、消息队列用消息 header。
+- 没有它各服务 Span 各自孤立，连不成完整链路；正因为是 W3C 行业共识，OTel 采集的链路能被任意遵循该标准的后端识别。
 
 ### 6. OTel Collector 为什么要用？
 - 解耦（换后端只改 Collector 配置）、卸载（批处理/重试/采样减轻应用负担）、协议转换（收 OTLP 发多格式）。

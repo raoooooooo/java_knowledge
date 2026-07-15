@@ -116,6 +116,7 @@
 | 文件 | 核心内容 |
 |------|---------|
 | [01-Prometheus指标详解.md](./10-监控与可观测性/01-Prometheus指标详解.md) | 4大核心指标（Counter/Gauge/Histogram/Summary）、适用场景对比、P50/P95/P99计算、常见面试题 |
+| [02-OpenTelemetry.md](./10-监控与可观测性/02-OpenTelemetry.md) | 可观测性统一标准(CNCF项目/厂商锁定痛点)、三大支柱(Traces/Metrics/Logs)、核心概念(Trace与Span/上下文传播/Resource/埋点/Baggage/语义约定)、架构(API+SDK+Collector)、与Prometheus/Jaeger关系 |
 
 ---
 

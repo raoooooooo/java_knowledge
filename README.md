@@ -138,8 +138,23 @@
 | [01-HDFS.md](./12-大数据/01-HDFS.md) | HDFS分布式文件系统 |
 | [02-YARN.md](./12-大数据/02-YARN.md) | YARN资源调度框架 |
 | [03-Hadoop生态.md](./12-大数据/03-Hadoop生态.md) | Hadoop生态系统全景 |
-| [04-Flink基础.md](./12-大数据/04-Flink基础.md) | Flink定位与流批一体、Lambda架构、Flink vs Spark、运行时架构(JobManager四组件/四层调度图/并行度/算子链Operator Chain/任务槽与槽共享)、部署模式(Session/Per-Job/Application)、DataStream API(执行环境/Source/转换算子/keyBy原理/max vs maxBy/rebalance vs rescale/RichFunction生命周期/Sink)、时间语义与水位线Watermark(生成/传递取最小/减1ms/空闲源)、窗口(滚动/滑动/会话/增量vs全窗口)、迟到数据三道防线、处理函数与定时器Timer、多流转换(Union vs Connect/Interval Join/CoGroup) |
-| [05-Flink进阶.md](./12-大数据/05-Flink进阶.md) | 状态编程(Keyed State vs Operator State/五种状态类型/TTL/状态后端HashMap vs RocksDB)、容错机制(Checkpoint与Chandy-Lamport算法/Barrier对齐与非对齐/Savepoint区别/状态一致性at-most/least/exactly-once/端到端精确一次/Flink+Kafka两阶段提交)、Table API与SQL(动态表与持续查询/更新查询vs追加查询/Append-Retract-Upsert编码/窗口TVF/UDF)、Flink CEP(复杂事件处理/NFA状态机/next-followedBy-followedByAny/超时与迟到处理)、性能与调优(反压Credit-Based流控/Flink内存模型/数据倾斜两阶段聚合) |
+#### Flink 系列（`12-大数据/Flink/`，共13章）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [01-初识Flink.md](./12-大数据/Flink/01-初识Flink.md) | Flink定位、流批一体、Lambda架构、Flink vs Spark、分层API |
+| [02-快速上手.md](./12-大数据/Flink/02-快速上手.md) | 开发流程、批处理vs流处理代码差异、输出前缀子任务编号 |
+| [03-部署.md](./12-大数据/Flink/03-部署.md) | Session/Per-Job/Application三种模式、Standalone/YARN/K8s、Standalone HA vs YARN HA |
+| [04-运行时架构.md](./12-大数据/Flink/04-运行时架构.md) | JobManager四组件、四层调度图、并行度、算子链Operator Chain、任务槽与槽共享 |
+| [05-DataStream-API基础.md](./12-大数据/Flink/05-DataStream-API基础.md) | 执行环境、Source、转换算子、keyBy原理、max vs maxBy、rebalance vs rescale、RichFunction生命周期、Sink |
+| [06-时间与窗口.md](./12-大数据/Flink/06-时间与窗口.md) | 时间语义、水位线Watermark(生成/传递取最小/减1ms/空闲源)、窗口(滚动/滑动/会话/增量vs全窗口)、迟到数据三道防线 |
+| [07-处理函数.md](./12-大数据/Flink/07-处理函数.md) | ProcessFunction、KeyedProcessFunction与定时器Timer、侧输出流、TopN案例 |
+| [08-多流转换.md](./12-大数据/Flink/08-多流转换.md) | Union vs Connect、Window Join、Interval Join、Window CoGroup |
+| [09-状态编程.md](./12-大数据/Flink/09-状态编程.md) | Keyed State vs Operator State、五种状态类型、状态TTL、状态后端HashMap vs RocksDB |
+| [10-容错机制.md](./12-大数据/Flink/10-容错机制.md) | Checkpoint与Chandy-Lamport算法、Barrier对齐与非对齐、Savepoint区别、状态一致性、端到端精确一次、Flink+Kafka两阶段提交 |
+| [11-Table-API与SQL.md](./12-大数据/Flink/11-Table-API与SQL.md) | 动态表与持续查询、更新查询vs追加查询、Append/Retract/Upsert编码、窗口TVF、UDF |
+| [12-Flink-CEP.md](./12-大数据/Flink/12-Flink-CEP.md) | 复杂事件处理、NFA状态机、next/followedBy/followedByAny、超时与迟到处理 |
+| [13-性能与调优.md](./12-大数据/Flink/13-性能与调优.md) | 反压Credit-Based流控、Flink内存模型、数据倾斜两阶段聚合、面试核心知识地图速记 |
 
 ---
 

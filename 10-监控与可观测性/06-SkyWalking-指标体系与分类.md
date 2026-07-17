@@ -1,0 +1,370 @@
+# 06 - SkyWalking 指标体系与分类
+
+## 核心概念
+
+### 1. 指标全景图
+
+SkyWalking 的指标体系分为五个层级，从宏观到微观：
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    SkyWalking 指标体系全景                          │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Level 1: Service 级别指标（服务整体健康度）                    │ │
+│  │  Apdex | Cpm(每分钟调用量) | SLA | RT(平均响应时间) |          │ │
+│  │  Throughput(吞吐量) | ErrorRate(错误率)                        │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                              │                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Level 2: ServiceInstance 级别指标（单个实例健康度）            │ │
+│  │  JVM内存(堆/非堆/直接内存) | JVM GC(次数/时间/阶段) |         │ │
+│  │  JVM线程(活跃/守护/峰值) | JVM CPU | JVM 类加载               │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                              │                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Level 3: Endpoint 级别指标（接口级别）                        │ │
+│  │  QPS | 延迟(P50/P75/P90/P95/P99) | 错误率 | 状态码分布       │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                              │                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Level 4: Relation 级别指标（服务间调用关系）                   │ │
+│  │  Client → Server 调用量/延迟/错误率（双向视角）                │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                              │                                    │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │  Level 5: Meter 自定义指标（基础设施/业务指标）                │ │
+│  │  Counter(计数器) | Gauge(瞬时值) | Histogram(分布) |          │ │
+│  │  DistributionSummary(摘要)                                    │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Service 级别指标详解
+
+#### 2.1 Apdex（应用性能指数）
+
+**Apdex（Application Performance Index）** 是衡量用户满意度的标准化指标，取值范围 0~1：
+
+```
+Apdex = (满意数 + 0.5 × 可容忍数) / 总采样数
+
+阈值定义（T = Apdex 阈值，通常设为服务 SLA 目标延迟）：
+- 满意（Satisfied）：RT ≤ T
+- 可容忍（Tolerating）：T < RT ≤ 4T
+- 失望（Frustrated）：RT > 4T
+```
+
+**Apdex 评分标准**：
+
+| Apdex 值 | 评级 | 含义 |
+|----------|------|------|
+| 0.94 ~ 1.00 | 优秀 | 用户满意度很高 |
+| 0.85 ~ 0.93 | 良好 | 大多数用户满意 |
+| 0.70 ~ 0.84 | 一般 | 部分用户感觉延迟 |
+| 0.50 ~ 0.69 | 较差 | 需要优化 |
+| < 0.50 | 不可接受 | 严重影响用户体验 |
+
+**SkyWalking 中的 Apdex 配置**：在 `application.yml` 中可通过 `service-apdex-threshold` 配置，默认 500ms。
+
+#### 2.2 Cpm（Call Per Minute，每分钟调用量）
+
+```
+Cpm = 每分钟该服务处理的请求总数
+```
+
+- 用于衡量服务负载
+- 与 QPS（Queries Per Second）的关系：Cpm = QPS × 60
+
+#### 2.3 SLA（Service Level Agreement）
+
+在 SkyWalking 中，SLA 指标通常指**请求成功率**：
+
+```
+SLA = 成功请求数 / 总请求数 × 100%
+```
+
+SkyWalking 将 SLA 以百分比形式展示，100% 表示所有请求都成功。
+
+#### 2.4 RT（Response Time，平均响应时间）
+
+```
+RT = 所有请求的响应时间总和 / 请求总数
+```
+
+**注意**：平均响应时间容易被长尾请求拉高，需要结合百分位延迟（P95/P99）一起看。
+
+#### 2.5 Throughput（吞吐量）
+
+```
+Throughput = 每分钟处理的请求总字节数
+```
+
+#### 2.6 ErrorRate（错误率）
+
+```
+ErrorRate = 错误请求数 / 总请求数 × 100%
+```
+
+### 3. ServiceInstance 级别指标（JVM 指标）
+
+SkyWalking 通过 Java Agent 自动采集 JVM 指标，无需额外配置。
+
+#### 3.1 JVM 内存指标
+
+| 指标 | 含义 | 数据来源 | 告警建议 |
+|------|------|---------|---------|
+| **堆内存使用量** | 当前堆内存使用大小 | `MemoryMXBean.getHeapMemoryUsage()` | > 80% 告警 |
+| **堆内存最大值** | 堆内存最大可用大小 | `-Xmx` 配置 | — |
+| **非堆内存使用量** | 元空间/CodeCache 等 | `MemoryMXBean.getNonHeapMemoryUsage()` | > 80% 告警 |
+| **直接内存使用量** | 堆外内存使用 | `BufferPoolMXBean` | 关注 OOM 风险 |
+| **各内存池使用量** | Eden/Survivor/Old/Metaspace | `MemoryPoolMXBean` | Old 区持续增长 → 内存泄漏 |
+
+**源码对应**：
+```java
+// oap-server/server-core/.../source/ServiceInstanceJVMMemory.java
+@ScopeDeclaration(id = DefaultScopeDefine.SERVICE_INSTANCE_JVM_MEMORY, name = "ServiceInstanceJVMMemory")
+public class ServiceInstanceJVMMemory extends Source {
+    private boolean isHeap;        // 是否堆内存
+    private long init;             // 初始值
+    private long max;              // 最大值
+    private long used;             // 已使用
+    private long committed;        // 已提交
+}
+```
+
+#### 3.2 JVM GC 指标
+
+| 指标 | 含义 | 数据来源 |
+|------|------|---------|
+| **Young GC 次数** | 年轻代 GC 次数 | `GarbageCollectorMXBean.getCollectionCount()` |
+| **Young GC 时间** | 年轻代 GC 总耗时 | `GarbageCollectorMXBean.getCollectionTime()` |
+| **Old GC 次数** | 老年代/Full GC 次数 | 同上 |
+| **Old GC 时间** | 老年代/Full GC 总耗时 | 同上 |
+| **GC 阶段** | New/Old | `GCPhase` 枚举 |
+
+**源码对应**：
+```java
+// oap-server/server-core/.../source/ServiceInstanceJVMGC.java
+@ScopeDeclaration(id = DefaultScopeDefine.SERVICE_INSTANCE_JVM_GC, name = "ServiceInstanceJVMGC")
+public class ServiceInstanceJVMGC extends Source {
+    private GCPhase phase;         // 枚举：NEW, OLD
+    private long time;             // GC 耗时
+    private long count;            // GC 次数
+}
+```
+
+#### 3.3 JVM 线程指标
+
+| 指标 | 含义 |
+|------|------|
+| **活跃线程数** | 当前活跃（非守护）线程数 |
+| **守护线程数** | 守护线程数 |
+| **峰值线程数** | 历史最高线程数 |
+| **总启动线程数** | 累计创建的线程数 |
+
+#### 3.4 JVM CPU 指标
+
+| 指标 | 含义 | 数据来源 |
+|------|------|---------|
+| **进程 CPU 使用率** | JVM 进程的 CPU 使用率 | `OperatingSystemMXBean.getProcessCpuLoad()` |
+| **系统 CPU 使用率** | 整机 CPU 使用率 | `OperatingSystemMXBean.getSystemCpuLoad()` |
+
+#### 3.5 JVM 类加载指标
+
+| 指标 | 含义 |
+|------|------|
+| **已加载类数量** | 当前已加载的类总数 |
+| **已卸载类数量** | 累计卸载的类总数 |
+
+### 4. Endpoint 级别指标
+
+| 指标 | 含义 | 计算方式 |
+|------|------|---------|
+| **QPS** | 每秒请求数 | 请求总数 / 统计周期秒数 |
+| **RT（平均响应时间）** | 平均响应时间 | 总耗时 / 请求数 |
+| **P50/P75/P90/P95/P99** | 百分位延迟 | 排序后取对应百分位值 |
+| **ErrorRate** | 错误率 | 错误请求数 / 总请求数 |
+| **状态码分布** | HTTP 状态码分布 | 按 status_code 分组统计 |
+| **SlowCount** | 慢请求数 | RT > 慢阈值 的请求数 |
+
+#### 百分位延迟（Percentile）详解
+
+**为什么需要百分位延迟？**
+
+平均响应时间（RT）会掩盖长尾请求。例如：
+- 100 个请求，99 个 10ms，1 个 10s → RT ≈ 109ms（看起来还好）
+- 但 P99 = 10s，说明有 1% 的用户体验极差
+
+**P50/P95/P99 的含义**：
+
+| 百分位 | 含义 | 面试问法 |
+|--------|------|---------|
+| P50 | 50% 请求的延迟 ≤ 此值（中位数） | "一半用户的响应时间" |
+| P95 | 95% 请求的延迟 ≤ 此值 | "95% 用户的体验" |
+| P99 | 99% 请求的延迟 ≤ 此值 | "长尾请求的严重程度" |
+
+```
+示例：100 个请求的响应时间（ms）：
+[5, 5, 5, 8, 8, 8, 10, 10, 10, 10, 10, 15, 15, 20, 20, 50, 100, 500, 1000, 5000]
+
+P50（第50个）= 10ms    → 一半用户响应在 10ms 以内
+P95（第95个）= 1000ms  → 5% 的用户响应超过 1000ms
+P99（第99个）= 5000ms  → 1% 的用户响应达到 5000ms
+P99.9（第99.9个）= 5000ms
+```
+
+### 5. Relation 级别指标（服务间调用指标）
+
+这是 SkyWalking 最独特的指标维度。对于 A → B 的一次调用，SkyWalking 同时记录：
+
+```
+                    ┌───────────┐
+                    │  Service A │
+                    └─────┬─────┘
+                          │ 调用
+                          ▼
+                    ┌───────────┐
+                    │  Service B │
+                    └───────────┘
+
+Client 视角（ServiceRelation.ClientSide）：
+  - A 调用 B 的 QPS、延迟、成功率
+  - 从 A 的 Exit Span 中统计
+
+Server 视角（ServiceRelation.ServerSide）：
+  - B 被 A 调用的 QPS、延迟、成功率
+  - 从 B 的 Entry Span 中统计
+```
+
+**为什么需要双向视角？**
+
+1. **网络延迟**：Client 端延迟 - Server 端延迟 ≈ 网络延迟（传输延迟 + 序列化开销）
+2. **错误定位**：Client 端报错而 Server 端正常 → 网络问题
+3. **调用量分析**：Client 端调用量 ≠ Server 端接收量时 → 可能存在网络丢包或负载均衡问题
+
+**源码对应**：
+```java
+// oap-server/server-core/.../source/ServiceRelation.java
+@ScopeDeclaration(id = DefaultScopeDefine.SERVICE_RELATION, name = "ServiceRelation")
+public class ServiceRelation extends Source {
+    private String entityId;
+    private int sourceServiceId;     // 调用方（Client）服务 ID
+    private String sourceServiceName;
+    private int destServiceId;       // 被调用方（Server）服务 ID
+    private String destServiceName;
+    private DetectPoint detectPoint; // CLIENT 或 SERVER 视角
+    private String componentId;       // 使用的组件
+}
+```
+
+### 6. Meter 自定义指标
+
+Meter（计量器）是 SkyWalking v8 引入的**自定义指标能力**，允许用户接入非 Trace 来源的指标数据（如业务指标、基础设施指标、自定义应用指标）。
+
+#### 6.1 Meter 指标类型
+
+| 类型 | 说明 | 适用场景 | 数据结构 |
+|------|------|---------|---------|
+| **Counter** | 单调递增计数器 | 请求总数、错误总数、消息生产数 | `long value` |
+| **Gauge** | 瞬时值，可增可减 | 当前连接数、队列长度、内存使用 | `double value` |
+| **Histogram** | 分布统计，自动计算 P50/P95/P99 | 请求延迟分布、数据包大小分布 | `double[] buckets` + `long[] counts` |
+| **DistributionSummary** | 统计学摘要 | 类似 Histogram | `count` + `total` + `max` |
+
+#### 6.2 Meter 数据来源
+
+| 来源 | 接入方式 | 说明 |
+|------|---------|------|
+| **Prometheus** | Prometheus Fetcher 拉取 | OAP 定时拉取 Prometheus Exporter 指标 |
+| **OpenTelemetry** | OTLP Receiver | 接收 OTel SDK 的 Meter 数据 |
+| **Java Agent（AgentMeter）** | Agent 内置 Meter | 如 JVM 指标、线程池指标 |
+| **Micrometer** | Micrometer Bridge | Spring Boot Actuator 指标桥接 |
+| **Telegraf** | Telegraf Receiver | 接收 Telegraf 采集的系统指标 |
+| **Zabbix** | Zabbix Receiver | 接收 Zabbix Agent 数据 |
+
+#### 6.3 MAL 处理 Meter 指标
+
+Meter 数据进入 OAP 后，通过 **MAL（Meter Analysis Language）** 进行聚合分析：
+
+```yaml
+# config/meter-analyzer-config/spring-sleuth.yaml
+metricsRules:
+  - name: http_server_requests_seconds_sum
+    exp: http_server_requests_seconds_sum.tagEqual("uri", "/api/**").sum(['service','uri'])
+```
+
+### 7. OAL 与 Prometheus 指标对照
+
+SkyWalking 的 OAL 定义了很多指标，但这些指标也可以通过 Prometheus 格式暴露：
+
+| OAL 指标 | 含义 | Prometheus 等价指标 |
+|----------|------|-------------------|
+| `service_cpm` | 服务每分钟调用量 | `rate(http_requests_total[1m])` |
+| `service_resp_time` | 服务平均响应时间 | `rate(http_request_duration_seconds_sum[1m]) / rate(http_request_duration_seconds_count[1m])` |
+| `service_sla` | 服务成功率 | `(sum(rate(http_requests_total{status!~"5.."}[1m])) / sum(rate(http_requests_total[1m]))) * 100` |
+| `endpoint_cpm` | 端点每分钟调用量 | `rate(http_requests_total[1m])` by endpoint |
+| `service_apdex` | 服务 Apdex | 需自定义计算 |
+
+---
+
+## 常见面试题
+
+### Q1: Apdex 指标是什么？如何计算？
+
+Apdex（Application Performance Index）是衡量用户满意度的标准化指标，范围 0~1。
+
+**计算公式**：
+```
+Apdex = (满意数 + 0.5 × 可容忍数) / 总采样数
+```
+
+**阈值规则**（T = 满意阈值，通常 500ms）：
+- 满意：RT ≤ T
+- 可容忍：T < RT ≤ 4T
+- 失望：RT > 4T
+
+**优势**：将复杂的延迟分布转化为一个 0~1 的单一指标，便于设定 SLA 和告警。1.0 表示所有用户都满意，0.5 表示一半用户不满意。
+
+### Q2: P99 和平均响应时间（RT）有什么区别？为什么 P99 更重要？
+
+| 对比维度 | 平均响应时间（RT） | P99 |
+|---------|-------------------|-----|
+| 计算方式 | 总耗时 / 总请求数 | 排序后第 99 百分位 |
+| 受极端值影响 | 容易被长尾拉高 | 不容易被极端值影响 |
+| 反映的问题 | 整体趋势 | 长尾问题的严重程度 |
+| 告警设计 | 波动大，不适合设阈值 | 适合设 SLA 告警阈值 |
+
+**为什么 P99 更重要？**
+- 平均值掩盖了长尾问题：99% 的用户都很快，但 1% 的用户等了 10 秒，平均 RT 看起来还是正常的
+- P99 直接反映了 1% 最差用户的体验，这与 SLA 设计一致（通常 SLA 承诺 99% 的请求在 Xms 内完成）
+
+### Q3: SkyWalking 的 ServiceRelation 指标有什么特殊之处？
+
+SkyWalking 的 Relation 指标最特殊的地方是**双向视角**：
+
+- **Client 视角**：从调用方（Exit Span）统计，包含网络延迟
+- **Server 视角**：从被调用方（Entry Span）统计，不含网络延迟
+
+通过对比两个视角的差异，可以定位网络问题：
+- Client 延迟 > Server 延迟 → 网络延迟较大
+- Client 错误率 > Server 错误率 → 网络不可靠
+- Client 调用量 ≠ Server 接收量 → 可能存在负载均衡问题
+
+### Q4: Meter 指标和 Trace 指标有什么区别？
+
+| 对比维度 | Trace 指标 | Meter 指标 |
+|---------|-----------|-----------|
+| 数据来源 | Agent 从请求链路中提取 | 外部系统推/拉 |
+| 数据粒度 | 与请求相关（service/endpoint） | 任意维度 |
+| 指标类型 | 预定义（OAL 脚本） | 自定义（MAL 脚本） |
+| 典型场景 | HTTP 请求延迟、QPS、错误率 | JVM 指标、业务指标、系统指标 |
+| 接入方式 | Agent 自动 | 需配置 MAL 规则 |
+
+---
+
+## 延伸阅读
+
+- SkyWalking OAL 指标定义：`oap-server/server-starter/src/main/resources/oal/core.oal`
+- Prometheus Fetcher 配置：`config/fetcher-promethus-config/`

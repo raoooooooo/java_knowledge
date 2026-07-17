@@ -118,6 +118,31 @@
 | [01-Prometheus指标详解.md](./10-监控与可观测性/01-Prometheus指标详解.md) | 4大核心指标（Counter/Gauge/Histogram/Summary）、适用场景对比、P50/P95/P99计算、常见面试题 |
 | [02-OpenTelemetry.md](./10-监控与可观测性/02-OpenTelemetry.md) | 可观测性统一标准(CNCF项目/厂商锁定痛点)、三大支柱(Traces/Metrics/Logs)、核心概念(Trace与Span/上下文传播/Resource/埋点/Baggage/语义约定)、架构(API+SDK+Collector)、与Prometheus/Jaeger关系 |
 
+#### SkyWalking 系列（`10-监控与可观测性/`，共20章）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [03-SkyWalking-初识.md](./10-监控与可观测性/03-SkyWalking-初识.md) | APM本质与演进、SkyWalking定位与历史、架构全景（Agent+OAP+UI+Satellite+Rover）、与Pinpoint/Jaeger/Zipkin/CAT/OpenTelemetry矩阵对比 |
+| [04-SkyWalking-快速上手.md](./10-监控与可观测性/04-SkyWalking-快速上手.md) | 环境准备、OAP单机部署、Java Agent接入、第一个Trace、UI初览、SpringBoot集成 |
+| [05-SkyWalking-核心概念与数据模型.md](./10-监控与可观测性/05-SkyWalking-核心概念与数据模型.md) | Service/ServiceInstance/Endpoint三层模型、Trace/Span/Segment关系与区别、Tags/Logs/Events、OperationName与端点发现、Layer分层、Component组件定义 |
+| [06-SkyWalking-指标体系与分类.md](./10-监控与可观测性/06-SkyWalking-指标体系与分类.md) | Service指标(Apdex/Cpm/SLA/RT/Throughput)、Instance JVM指标(内存/GC/线程/CPU)、Endpoint指标(QPS/P50/P95/P99)、Relation双向指标、Meter自定义指标(Counter/Gauge/Histogram)、百分位计算 |
+| [07-SkyWalking-Trace传播协议.md](./10-监控与可观测性/07-SkyWalking-Trace传播协议.md) | sw8协议详解(Header编码/解码)、跨进程传播(ContextCarrier)、跨线程传播(ContextSnapshot)、跨语言传播、TraceId/SegmentId/SpanId生成规则、忽略端点与Trace忽略 |
+| [08-SkyWalking-探针原理.md](./10-监控与可观测性/08-SkyWalking-探针原理.md) | Java Agent启动机制(premain)、字节码增强(ByteBuddy)、类加载隔离(AgentClassLoader/PluginClassLoader)、拦截点定义(AbstractClassEnhancePluginDefine)、ContextManager状态机 |
+| [09-SkyWalking-插件体系.md](./10-监控与可观测性/09-SkyWalking-插件体系.md) | 内置插件全景(HTTP/RPC/DB/Cache/MQ)、插件增强四要素、可选插件vs Boot插件、自定义插件开发完整实战 |
+| [10-SkyWalking-OAP架构.md](./10-监控与可观测性/10-SkyWalking-OAP架构.md) | 模块化设计(ModuleDefine/ModuleProvider)、集群角色(Mixed/Receiver/Aggregator)、水平扩展策略、启动流程(BootstrapFlow)、gRPC/HTTP服务 |
+| [11-SkyWalking-数据采集与传输.md](./10-监控与可观测性/11-SkyWalking-数据采集与传输.md) | 上报协议(gRPC/Kafka/HTTP)、Agent注册流程、DataCarrier(RingBuffer/背压)、批量处理(TraceBuffer/LogBuffer)、连接管理 |
+| [12-SkyWalking-数据计算与流式处理.md](./10-监控与可观测性/12-SkyWalking-数据计算与流式处理.md) | OAL引擎(语法/编译/执行)、L1聚合(Agent端)、L2聚合(OAP端/TraceAnalyzer/监听器)、三级降采样(L1/L2/L3)、TopN计算(最小堆)、慢查询检测、热力图 |
+| [13-SkyWalking-存储引擎.md](./10-监控与可观测性/13-SkyWalking-存储引擎.md) | H2(内存/文件)、MySQL(按时间分表/TTL)、Elasticsearch(索引模板/分片/滚动索引)、BanyanDB(自研列式存储/LSM/压缩)、OpenSearch、TTL数据清理、存储选型对比矩阵 |
+| [14-SkyWalking-UI与可视化.md](./10-监控与可观测性/14-SkyWalking-UI与可视化.md) | Dashboard(全局/服务/实例/端点)、拓扑图(服务依赖图)、Trace详情(调用树/时间轴)、日志面板(Trace-Log关联)、Profiling火焰图、自定义仪表盘 |
+| [15-SkyWalking-告警与通知.md](./10-监控与可观测性/15-SkyWalking-告警与通知.md) | 告警规则引擎(yarldsl)、告警生命周期(触发→持续→恢复)、Webhook/钉钉/企微/飞书通知、动态配置(Apollo/Nacos/ZK)、与AlertManager集成 |
+| [16-SkyWalking-OpenTelemetry对接.md](./10-监控与可观测性/16-SkyWalking-OpenTelemetry对接.md) | OTel协议兼容(OTLP Receiver)、三种混合架构方案、sw8 vs W3C TraceContext、迁移策略、与Prometheus/PromQL集成 |
+| [17-SkyWalking-浏览器监控与ServiceMesh.md](./10-监控与可观测性/17-SkyWalking-浏览器监控与ServiceMesh.md) | Browser Agent(Web Vitals/错误收集/XHR追踪)、Service Mesh(Istio/Envoy ALS)、Kubernetes(SWCK Operator)、Satellite边车网关、eBPF Rover |
+| [18-SkyWalking-MAL与日志分析.md](./10-监控与可观测性/18-SkyWalking-MAL与日志分析.md) | MAL(Meter Analysis Language)、LAL(Log Analysis Language/日志解析/结构化)、日志桥接(Logback/Log4j2→MDC注入)、MQE(Metrics Query Engine) |
+| [19-SkyWalking-源码分析.md](./10-监控与可观测性/19-SkyWalking-源码分析.md) | Agent端(premain→PluginFinder→ByteBuddy→TracingContext→上报)、OAP端(模块启动→DataCarrier→TraceAnalyzer→OAL→存储)、端到端代码走读 |
+| [20-SkyWalking-高级特性.md](./10-监控与可观测性/20-SkyWalking-高级特性.md) | 采样策略(全采样/强制/慢SQL)、Profiling(On-CPU线程栈/火焰图)、eBPF Rover、Event事件系统、Namespace多租户、TLS/mTLS、swctl CLI |
+| [21-SkyWalking-生产实践.md](./10-监控与可观测性/21-SkyWalking-生产实践.md) | 大规模部署(1000+Agent)、OAP JVM调优(G1GC)、ES调优(索引/分片/refresh_interval)、常见问题排查(Agent不上报/拓扑不全/内存溢出)、OAP Telemetry自监控、与Prometheus+Grafana+Loki协同 |
+| [22-SkyWalking-版本演进与生态.md](./10-监控与可观测性/22-SkyWalking-版本演进与生态.md) | v5→v10演进历史、v8(MAL/LAL)→v9(OTel/UI/MQE)→v10(BanyanDB/分层拓扑)关键变化、Apache治理、生态工具链、知名用户、技术趋势 |
+
 ---
 
 ### 12 - 云原生

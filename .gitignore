@@ -28,3 +28,8 @@ replay_pid*
 *.doc
 *.pdf
 ~$*
+
+# SkyWalking 源码（不提交，仅本地学习参考）
+skywalking
+skywalking/
+skywalking-java/

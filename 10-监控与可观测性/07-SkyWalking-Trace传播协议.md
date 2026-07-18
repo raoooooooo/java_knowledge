@@ -289,15 +289,69 @@ OTel TraceId（32 位 hex） → 直接作为 SkyWalking TraceId 存储
 
 ### 6. 忽略端点与 Trace 忽略
 
-#### 6.1 忽略端点（ignore_suffix）
+#### 6.1 忽略端点（ignore_suffix + ignore_path）
 
-通过 `agent.ignore_suffix` 配置，可以忽略特定 URL 后缀的请求（如静态资源），避免产生无意义的 Trace：
+SkyWalking 提供两种忽略策略，分别应对不同场景：
+
+| 配置项 | 匹配方式 | 适用场景 | 支持版本 |
+|--------|---------|---------|---------|
+| `agent.ignore_suffix` | 后缀匹配 | 静态资源（`.jpg`、`.js`、`.css` 等） | 所有版本 |
+| `trace.ignore_path` | 路径模式匹配（Ant 风格通配符） | REST API 动态路径、健康检查端点 | v8.5+ |
+
+**① 后缀匹配（ignore_suffix）**：
 
 ```properties
+# 忽略所有静态资源后缀
 agent.ignore_suffix=.jpg,.jpeg,.js,.css,.png,.bmp,.gif,.ico,.woff,.woff2,.html,.htm
 ```
 
-**原理**：Agent 在拦截 HTTP 请求时，检查请求 URL 的后缀，如果匹配 `ignore_suffix`，则跳过 Span 创建。
+原理：Agent 拦截 HTTP 请求时，检查 URL **后缀**，匹配则跳过 Span 创建。
+
+**② 路径模式匹配（ignore_path，支持动态参数）**：
+
+对于 REST API 的动态路径参数（如 `/user/123`、`/order/456`），用后缀匹配无法处理，需要用 `trace.ignore_path` 的**通配符模式匹配**：
+
+```properties
+# config/agent.config 或环境变量 SW_TRACE_IGNORE_PATH
+
+# Ant 风格通配符规则：
+# ?  → 匹配单个字符
+# *  → 匹配 0 或多个字符（单级路径）
+# ** → 匹配 0 或多个目录（多级路径）
+
+# 示例1：忽略 /actuator/** 下的所有健康检查端点
+trace.ignore_path=/actuator/**
+
+# 示例2：忽略 /user/{id} 格式的动态路径（任意数字 ID）
+trace.ignore_path=/user/*
+
+# 示例3：忽略 /api/v1/** 下的所有内部 API
+trace.ignore_path=/api/v1/**
+
+# 示例4：忽略 /health 和 /healthcheck
+trace.ignore_path=/health,/healthcheck
+
+# 示例5：多模式组合（用逗号分隔）
+trace.ignore_path=/actuator/**,/user/*,/health
+```
+
+**动态参数的匹配原理**：
+
+```
+请求 URL = /user/12345
+配置规则 = /user/*
+        ↓
+* 匹配 "12345" → 匹配成功 → 跳过 Span 创建
+
+请求 URL = /order/abc123/detail
+配置规则 = /order/**/detail
+        ↓
+** 匹配 "abc123" → 匹配成功 → 跳过 Span 创建
+```
+
+> ⚠️ **注意匹配顺序**：SkyWalking 会按配置的顺序依次匹配，第一个匹配的规则生效。如果有重叠规则（如 `/user/*` 和 `/user/delete`），把更精确的规则放前面。
+
+**原理**：Agent 拦截 HTTP 请求时，先用 AntPathMatcher 对 URL **全路径**做模式匹配，匹配成功则跳过 Span 创建。
 
 #### 6.2 Trace 忽略（sample rate）
 

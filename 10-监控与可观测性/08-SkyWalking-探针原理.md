@@ -80,10 +80,56 @@ SkyWalkingAgent.premain()
 
 #### 3.1 为什么需要类加载隔离？
 
-SkyWalking Agent 作为基础架构组件，其依赖的库（如 gRPC、Protobuf、ByteBuddy 等）可能与业务应用的依赖**版本冲突**。例如：
+类加载隔离是所有 APM 探针的**核心技术难题**，不做隔离的 Agent 在生产环境中 100% 会出问题。
 
-- 业务应用使用 gRPC 1.30 → Agent 使用 gRPC 1.50
-- 如果共用一个类加载器，会导致 `NoSuchMethodError` 等运行时错误
+**场景 1：依赖版本冲突（最常见）**
+
+```
+业务应用的 classpath：
+  ├── gRPC 1.30（业务 2019 年上线，一直没升级）
+  ├── Netty 4.1.42
+  └── Protobuf 3.5
+
+SkyWalking Agent 的 classpath：
+  ├── gRPC 1.50（Agent 2023 年版本，需要新特性）
+  ├── Netty 4.1.90
+  └── Protobuf 3.21
+
+如果不隔离：
+  JVM 先加载到业务的 gRPC 1.30 → Agent 调用 gRPC 1.50 新增的方法
+  → NoSuchMethodError → 业务应用启动失败！
+```
+
+**场景 2：类重复加载问题**
+
+Agent 会增强很多业务类（如 `@RestController`、`@Service`），如果 Agent 和业务用同一个 ClassLoader：
+
+```
+同一个类被加载两次：
+  1. AppClassLoader 加载业务类 UserController
+  2. Agent 增强后，ByteBuddy 又生成一个 UserController$Enhanced
+
+结果：
+  instanceof 判断失效 → UserController.class != UserController$Enhanced.class
+  强转失败 → ClassCastException
+  Spring 依赖注入失败 → 应用启动崩溃
+```
+
+**场景 3：SPI 服务发现污染**
+
+很多框架用 Java SPI 机制（如 JDBC Driver、SLF4J），如果不隔离：
+
+```
+Agent 的 SLF4J binding ←→ 业务的 SLF4J binding
+  ↓
+SPI 服务发现时，两个 binding 都被加载
+  ↓
+SLF4J 报 "multiple bindings" 警告，随机选一个
+  ↓
+Agent 的日志打到业务的日志文件里，或者反过来
+```
+
+**类加载隔离的本质**：让 Agent 的依赖和业务的依赖分别放在不同的「命名空间」里，互不干扰。
 
 #### 3.2 AgentClassLoader 设计
 
@@ -111,6 +157,45 @@ SkyWalking Agent 作为基础架构组件，其依赖的库（如 gRPC、Protobu
 1. AgentClassLoader 以 AppClassLoader 为父加载器（可以访问业务类）
 2. Agent 的第三方依赖放在 AgentClassLoader 中（与业务依赖隔离）
 3. 插件类使用独立的 PluginClassLoader（插件之间隔离）
+
+#### 3.3 Pinpoint 也用了类加载隔离吗？
+
+**用了，而且比 SkyWalking 更复杂**。
+
+Pinpoint 作为最早开源的 APM 探针（2014 年），在类加载隔离上踩了很多坑，它的隔离方案比 SkyWalking 更激进：
+
+| 对比维度 | SkyWalking | Pinpoint |
+|---------|-----------|---------|
+| **核心类加载器 | AgentClassLoader | IsolatedClassLoader |
+| **插件隔离** | PluginClassLoader（每个插件独立） | BootstrapPlugin + AgentPluginClassLoader |
+| **Bootstrap 类注入 | ✅ 用 Instrumentation.appendToBootstrapClassLoaderSearch | ✅ 同样用 Bootstrap 注入 |
+| **类加载顺序** | 双亲委派（先查自己，再查父加载器 | 完全打破双亲委派（**先自己加载，找不到再问父要**） |
+| **隔离粒度** | Agent vs 业务 | Agent vs 业务 vs 插件之间 |
+
+**Pinpoint 为什么要打破双亲委派？**
+
+Pinpoint 诞生于 2014 年，当时 ByteBuddy 还不成熟，Pinpoint 选择了 ASM 做字节码增强，同时遇到了更极端的类加载冲突问题：
+
+```
+问题：某些中间件自己有类加载器（如 Tomcat 的 WebAppClassLoader）
+
+  Tomcat WebAppClassLoader
+    ├── 每个 WebApp 有自己的 classpath
+    └── 不遵循双亲委派（先查自己，再查父）
+
+如果 Agent 用正常的双亲委派：
+  Agent 的类放在父加载器里 → WebApp 里的类看不到 Agent 的类
+  → 插件无法增强 WebApp 里的类
+
+Pinpoint 的解决方案：
+  把 Agent 的核心类注入到 Bootstrap ClassLoader 里
+  → 所有类加载器都能看到
+  → 不管中间件的自定义类加载器也能访问 Agent 的类
+```
+
+**代价**：把 Agent 的类注入 Bootstrap 后，优先级极高，一旦出问题就是 JVM 直接 crash。所以 Pinpoint 的 Agent 稳定性问题一度是社区吐槽的重点。
+
+**一句话总结**：所有生产级 APM 探针都必须做类加载隔离——区别只在「隔离的粒度」和「是否打破双亲委派」。SkyWalking 相对保守（遵循双亲委派），Pinpoint 更激进（打破双亲委派，注入 Bootstrap）。
 
 ### 4. 字节码增强（ByteBuddy）
 
@@ -414,7 +499,26 @@ ContextManager（线程安全、入口类）
 
 SkyWalking 使用 premain 方式，确保在业务类加载之前就注册好 Transformer。
 
-### Q4: 如果 Agent 配置错误，会不会导致业务应用启动失败？
+### Q4: 所有 APM 探针都要做类加载隔离吗？Pinpoint 是怎么做的？
+
+**是的，所有生产级 APM 都必须做类加载隔离**，否则一定会遇到依赖版本冲突、类重复加载、SPI 污染等问题。
+
+| APM | 隔离方案 | 特点 |
+|------|---------|------|
+| SkyWalking | AgentClassLoader | 遵循双亲委派，插件独立加载器 | 相对保守，稳定性好 |
+| Pinpoint | IsolatedClassLoader | 打破双亲委派，核心类注入 Bootstrap | 更激进，适配更多坑更多 |
+| Jaeger | 无（SDK 模式，无隔离） | 无隔离，依赖冲突问题较多 |
+| Arthas | SpecializedClassLoader | 打破双亲委派，独立命名空间 |
+
+**Pinpoint 的隔离方案的区别：
+
+1. **打破双亲委派**：先自己加载，找不到再问父要
+2. **Bootstrap 注入**：把核心类注入 Bootstrap ClassLoader，确保所有自定义类加载器都能看到
+3. **插件双重检查**：插件之间也做隔离，避免插件之间的依赖冲突
+
+> ⚠️ 为什么很多人觉得 Pinpoint 更容易导致应用崩溃？——就是因为它打破了双亲委派，且核心类放在 Bootstrap，一旦出问题就是 JVM 级别的崩溃。SkyWalking 的保守设计相对更稳定。
+
+### Q5: 如果 Agent 配置错误，会不会导致业务应用启动失败？
 
 **不会**。SkyWalking Agent 的设计原则是**"Agent 失败不影响业务"**：
 

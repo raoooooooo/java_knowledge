@@ -213,29 +213,106 @@ OTel Agent 构建时：
   是完全不同的两个类，不存在版本冲突！
 ```
 
-**三种方案对比**：
+#### 3.5 灵魂拷问：为什么 Pinpoint 必须打破双亲委派，而 SkyWalking 和 OTel 不需要？
 
-| 方案 | 代表产品 | 原理 | 优点 | 缺点 |
-|------|---------|------|------|------|
-| **自定义 ClassLoader** | SkyWalking | AgentClassLoader 隔离依赖 | 1. 不需要修改字节码<br>2. 插件可以独立加载<br>3. 调试方便 | 1. 类加载器层次复杂<br>2. 跨加载器调用需要反射 |
-| **打破双亲委派 + Bootstrap 注入** | Pinpoint | 核心类注入 Bootstrap，插件隔离 | 1. 适配所有自定义类加载器（Tomcat 等）<br>2. 插件访问权限最大 | 1. 风险极高，一旦出错 JVM 直接 crash<br>2. 调试困难 |
-| **Maven Shade 影子类** | OpenTelemetry | 构建时重命名所有依赖包名 | 1. 不涉及类加载器黑科技<br>2. 原理简单，出问题好排查<br>3. 兼容性最好 | 1. Agent JAR 包变大（所有依赖都打进去）<br>2. 构建时间变长<br>3. 堆栈里的类名是 `xxx.shaded.xxx`，可读性差 |
+**根本原因：三者对「类可见性」的要求不同，增强策略不同。**
 
-**OTel 为什么选影子类方案？**
+| 对比维度 | Pinpoint | SkyWalking | OpenTelemetry |
+|---------|---------|-----------|--------------|
+| **增强范围** | 一切方法调用（包括 JDK 核心类） | 只增强框架入口点（不增强 JDK） | 中间增强（比 SW 多，比 Pinpoint 少） |
+| **增强 JDK 核心类** | ✅ 是（如 `java.net.Socket`） | ❌ 否 | ⚠️ 部分（可选） |
+| **对类可见性的要求** | 极高（Bootstrap 也要能看到拦截器） | 中等（只要业务类加载器能看到） | 高（但用影子类绕过去） |
+| **Bootstrap 注入** | ✅ 必须 | ❌ 不需要 | ⚠️ 部分（Agent 核心类） |
+| **打破双亲委派** | ✅ 必须 | ❌ 不需要 | ❌ 不需要 |
 
-OTel 的定位是「标准」，不是「APM 产品」。它需要适配所有 Java 应用（包括各种老应用、奇葩类加载器的应用），**兼容性是第一位**。
+---
+
+**① Pinpoint 为什么必须打破双亲委派？**
+
+**核心诉求：要增强 JDK 核心类，还要适配 Tomcat 的反双亲委派。**
+
+场景 1：增强 JDK 核心类（如 `java.net.Socket`）
 
 ```
-OTel 的设计哲学：
-  我不管你的应用用了什么类加载器
-  我也不管你的应用依赖了什么版本的库
-  我把我自己的所有依赖全部重命名
-  → 永远不会和你的业务代码冲突
+java.net.Socket 由 Bootstrap ClassLoader 加载
+
+  如果 Pinpoint 的拦截器放在 AgentClassLoader：
+    Bootstrap 是父加载器，看不到子加载器（AgentClassLoader）的类
+    → Socket 增强后调用拦截器 → ClassNotFoundException
+    → 增强失败！
+
+  唯一解：
+    把拦截器核心类注入 Bootstrap ClassLoader
+    → Bootstrap 能看到拦截器 → 增强成功
 ```
 
-**代价**：OTel Agent 的 JAR 包有 20MB+（SkyWalking Agent 只有 10MB 左右），因为所有依赖都打进去了。
+场景 2：适配 Tomcat WebAppClassLoader
 
-> ⚠️ **面试题延伸**：三种方案没有绝对的好坏，只是设计哲学不同——SkyWalking 选「保守稳定」，Pinpoint 选「极致适配」，OTel 选「通用兼容」。
+```
+Tomcat WebAppClassLoader 故意打破双亲委派：
+  1. 先在自己的 WebApp classpath 里找
+  2. 找不到再问父加载器要
+
+  如果 Agent 的类放在父加载器（AgentClassLoader）：
+    WebApp 里的 Servlet 类看不到父加载器的类
+    → 插件无法增强 Servlet
+
+  Pinpoint 的解决方案：
+    把核心类注入 Bootstrap
+    → Bootstrap 是所有类加载器的根
+    → 所有类加载器都能看到
+```
+
+结果：**Pinpoint 能增强任何类，兼容性最强，但代价是风险最高**。
+
+---
+
+**② SkyWalking 为什么不需要打破双亲委派？**
+
+**核心诉求：只增强"框架入口点"，不增强 JDK 核心类。**
+
+```
+SkyWalking 的增强策略：
+  ├── 只增强 @RestController / @Service（业务层入口）
+  ├── 只增强 Dubbo Provider / Consumer（RPC 入口）
+  ├── 只增强 JDBC Driver / Redis Client（中间件入口）
+  └── 不增强 JDK 核心类（如 java.net.Socket）
+
+  这些入口类的共同点：
+    → 都由 AppClassLoader 或 WebAppClassLoader 加载
+    → AgentClassLoader 是 AppClassLoader 的子加载器
+    → 遵循双亲委派，子加载器能看到父加载器的类
+    → 完全不需要 Bootstrap 注入！
+```
+
+结果：**SkyWalking 的插件数量比 Pinpoint 少，但稳定性更好**——Pinpoint 追求"全链路无死角"，SkyWalking 追求"覆盖 99% 场景，牺牲 1% 换稳定性"。
+
+---
+
+**③ OTel 为什么不需要打破双亲委派？**
+
+**核心诉求：我根本不玩类加载器这套，我用影子类绕过去。**
+
+```
+OTel 的思路：
+  我不管你是 Bootstrap 还是 WebAppClassLoader
+  我把所有依赖全部重命名（io.grpc → io.opentelemetry.shaded.grpc）
+  我把核心类全部打在 Agent JAR 里
+  我用 ByteBuddy 的 ClassInjector 把拦截器注入到正确的类加载器
+  → 根本不需要关心双亲委派的问题
+```
+
+结果：**OTel 的兼容性最好，不需要搞类加载器黑科技，但代价是 JAR 包最大**。
+
+---
+
+**一句话总结三种设计哲学**：
+
+| APM | 路线 | 一句话总结 |
+|------|------|----------|
+| **Pinpoint** | 打破双亲委派 + Bootstrap 注入 | 我爬到最高的地方，所有人都能看到我，我也能看到所有人 |
+| **SkyWalking** | 自定义 ClassLoader + 遵循双亲委派 | 我建一堵墙，你在那边，我在这边，互不干扰 |
+| **OpenTelemetry** | Maven Shade 影子类 | 我改个名字，你认不出我，就不会和我冲突了 |
 
 ### 4. 字节码增强（ByteBuddy）
 

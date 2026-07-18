@@ -368,6 +368,60 @@ metricsRules:
     exp: http_server_requests_seconds_sum.tagEqual("uri", "/api/**").sum(['service','uri'])
 ```
 
+#### 6.4 ⚠️ 关键区分：OTel 的 Traces 和 Metrics 在 SkyWalking 中走的是两条路
+
+很多初学者会混淆：用 OpenTelemetry 采集指标走 Meter，那 OTel 的调用链（Traces）去哪了？**答案是：OTel 发送的是三种信号，SkyWalking 分别走三条不同的处理管道。**
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  OpenTelemetry SDK 发送三种信号到 SkyWalking OAP                   │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  ┌─────────────────────┐                                          │
+│  │  OTel Java Agent    │                                          │
+│  │  (或 OTel SDK)       │                                          │
+│  └────────┬────────────┘                                          │
+│           │ OTLP 协议（gRPC :4317 或 HTTP :4318）                   │
+│           ▼                                                       │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │  SkyWalking OAP — OTLP Receiver                            │  │
+│  │                                                            │  │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌────────────┐ │  │
+│  │  │  OTel Traces    │  │  OTel Metrics   │  │  OTel Logs  │ │  │
+│  │  │  (Spans)        │  │  (Counter/Gauge/│  │  (LogRecords│ │  │
+│  │  │                 │  │   Histogram)     │  │   )         │ │  │
+│  │  └───────┬─────────┘  └───────┬─────────┘  └──────┬─────┘ │  │
+│  │          │                    │                    │       │  │
+│  └──────────┼────────────────────┼────────────────────┼───────┘  │
+│             │                    │                    │           │
+│             ▼                    ▼                    ▼           │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐  │
+│  │  Trace 管道       │ │  Meter 管道       │ │  Log 管道         │  │
+│  │  (TraceAnalyzer) │ │  (MAL 引擎)       │ │  (LAL 引擎)       │  │
+│  │                  │ │                  │ │                  │  │
+│  │  OTel Span →     │ │  OTel Counter →  │ │  OTel LogRecord  │  │
+│  │  SkyWalking      │ │  SkyWalking      │ │  → SkyWalking    │  │
+│  │  Segment/Span    │ │  Meter 指标      │ │  Log 记录        │  │
+│  │                  │ │                  │ │                  │  │
+│  │  → OAL 聚合      │ │  → MAL 聚合      │ │  → LAL 分析      │  │
+│  │  → Service/      │ │  → Meter 指标    │ │  → 日志指标      │  │
+│  │    Endpoint/     │ │    存储          │ │    存储          │  │
+│  │    Relation 指标 │ │                  │ │                  │  │
+│  └──────────────────┘ └──────────────────┘ └──────────────────┘  │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**核心结论**：
+
+| OTel 信号 | 进入 SkyWalking 后变成 | 用什么语言分析 | 产生什么指标 |
+|-----------|----------------------|---------------|-------------|
+| **Traces（Spans）** | Segment / Span（Trace 模型） | OAL | service_cpm、endpoint_p99、service_apdex 等 |
+| **Metrics（Counter/Gauge/Histogram）** | Meter 指标 | MAL | 自定义业务指标（如订单数、库存量） |
+| **Logs（LogRecords）** | Log 记录 | LAL | 日志错误率、日志模式匹配 |
+
+> **一句话**：OTel 的调用链（Traces）**不走 Meter 管道**，它走的是 Trace 管道——和 SkyWalking Agent 上报的 Segment 走的是**同一条路**。OAP 的 OTLP Receiver 会把 OTel Span 转换成 SkyWalking 的 Segment/Span 模型，然后用 OAL 脚本聚合出 Service/Endpoint/Relation 指标。Meter 只负责处理 OTel 的 Metrics 信号（以及 Prometheus、Micrometer 等其他来源的指标）。
+
 ### 7. OAL 与 Prometheus 指标对照
 
 SkyWalking 的 OAL 定义了很多指标，但这些指标也可以通过 Prometheus 格式暴露：
@@ -434,6 +488,24 @@ SkyWalking 的 Relation 指标最特殊的地方是**双向视角**：
 | 指标类型 | 预定义（OAL 脚本） | 自定义（MAL 脚本） |
 | 典型场景 | HTTP 请求延迟、QPS、错误率 | JVM 指标、业务指标、系统指标 |
 | 接入方式 | Agent 自动 | 需配置 MAL 规则 |
+
+### Q5: 如果用 OpenTelemetry 采集指标走 Meter，那 OTel 的调用链怎么处理？
+
+这是一个常见的误解。**OpenTelemetry 发送三种信号（Traces / Metrics / Logs），SkyWalking OAP 的 OTLP Receiver 会分别走三条管道：**
+
+| OTel 信号 | SkyWalking 管道 | 分析引擎 | 产物 |
+|-----------|----------------|---------|------|
+| **Traces（Spans）** | Trace 管道 | OAL | service_cpm、endpoint_p99、拓扑图等 |
+| **Metrics（Counter/Gauge/Histogram）** | Meter 管道 | MAL | 自定义业务指标 |
+| **Logs（LogRecords）** | Log 管道 | LAL | 日志模式、错误率 |
+
+**关键点**：OTel 的调用链（Traces）**不走 Meter 管道**，而是走 Trace 管道——OTLP Receiver 会把 OTel Span 转换成 SkyWalking 的 Segment/Span 模型，然后和 SkyWalking Agent 上报的数据**走同一套 OAL 聚合逻辑**。所以：
+
+- 你用 OTel Agent 采集 → 调用链照样展示在 SkyWalking 拓扑图和 Trace 详情页中
+- 你用 OTel Agent 采集 → Service/Endpoint/Relation 指标照样自动生成（OAL 分析）
+- Meter 只是额外处理 OTel 的 Metrics 信号，不影响 Trace 的处理
+
+**一句话**：OTel 的 Traces 和 Metrics 在 SkyWalking 中是**两条完全独立的管道**，互不干扰，也互不替代。
 
 ---
 

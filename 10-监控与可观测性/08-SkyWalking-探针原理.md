@@ -124,6 +124,26 @@ SkyWalking Agent 作为基础架构组件，其依赖的库（如 gRPC、Protobu
 | 社区活跃度 | ★★★★★ 高 | ★★★☆☆ 中 | ★★★☆☆ 中 |
 | 学习曲线 | 低 | 高 | 中 |
 
+**ByteBuddy vs ASM 深度对比**：
+
+| 维度 | ByteBuddy | ASM |
+|------|-----------|-----|
+| **抽象层级** | 高级 API，面向"类/方法"语义 | 低级 API，面向"字节码指令" |
+| **编程模型** | 声明式（DSL 链式调用，描述"做什么"） | 命令式（Visitor 模式，手动操作字节码） |
+| **代码示例** | `new ByteBuddy().subclass(Foo.class).method(named("bar")).intercept(...)` | `mv.visitVarInsn(ALOAD, 0); mv.visitMethodInsn(INVOKESTATIC, ...);` |
+| **类型安全** | 编译期类型检查，重命名/重构友好 | 字符串常量拼字节码，重构易出错 |
+| **字节码知识要求** | 几乎不需要 | 需要深入理解 JVM 字节码指令集、栈帧、常量池 |
+| **性能差异** | 接近 ASM（底层也生成字节码），略慢 5-10% | 最接近手写字节码，零开销 |
+| **调试难度** | 生成的代码可读，断点调试友好 | 字节码级错误难排查，`VerifyError` 常见 |
+| **代表用户** | SkyWalking、Mockito、Hibernate | Pinpoint、CGLIB、Groovy |
+| **适用场景** | 业务逻辑拦截、AOP、APM 探针 | 底层框架、字节码分析工具、性能极致场景 |
+
+**选型结论**：
+- 选 **ByteBuddy**：大多数场景，特别是 APM 探针（需要快速开发插件、团队不需要字节码专家）
+- 选 **ASM**：极致性能场景、字节码分析工具（如 FindBugs/SpotBugs）、需要精确控制字节码的场景
+
+> ⚠️ Pinpoint 选择 ASM 有其历史原因——Pinpoint 诞生于 2014 年，当时 ByteBuddy 还不够成熟（v1.0 于 2014 年发布）。SkyWalking 在 2017 年重构时选用了已经成熟的 ByteBuddy，代表了业界的趋势。
+
 #### 4.2 增强流程
 
 ```

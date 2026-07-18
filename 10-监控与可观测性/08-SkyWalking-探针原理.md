@@ -195,7 +195,47 @@ Pinpoint 的解决方案：
 
 **代价**：把 Agent 的类注入 Bootstrap 后，优先级极高，一旦出问题就是 JVM 直接 crash。所以 Pinpoint 的 Agent 稳定性问题一度是社区吐槽的重点。
 
-**一句话总结**：所有生产级 APM 探针都必须做类加载隔离——区别只在「隔离的粒度」和「是否打破双亲委派」。SkyWalking 相对保守（遵循双亲委派），Pinpoint 更激进（打破双亲委派，注入 Bootstrap）。
+#### 3.4 OpenTelemetry Java Agent 的类加载隔离方案
+
+OTel 走了第三条路：**不做 ClassLoader 级别的隔离，而是用 Maven Shade 插件把所有依赖「重命名打包」**。
+
+**OTel 的做法：影子类（Shaded Classes）**
+
+```
+OTel Agent 构建时：
+  ├── 把 gRPC 1.50 的包名从 io.grpc → io.opentelemetry.shaded.grpc
+  ├── 把 Netty 4.1.90 的包名从 io.netty → io.opentelemetry.shaded.netty
+  ├── 把 Protobuf 3.21 的包名从 com.google.protobuf → io.opentelemetry.shaded.protobuf
+  └── 所有内部依赖全部重命名
+
+结果：
+  业务的 io.grpc 1.30 和 OTel 的 io.opentelemetry.shaded.grpc 1.50
+  是完全不同的两个类，不存在版本冲突！
+```
+
+**三种方案对比**：
+
+| 方案 | 代表产品 | 原理 | 优点 | 缺点 |
+|------|---------|------|------|------|
+| **自定义 ClassLoader** | SkyWalking | AgentClassLoader 隔离依赖 | 1. 不需要修改字节码<br>2. 插件可以独立加载<br>3. 调试方便 | 1. 类加载器层次复杂<br>2. 跨加载器调用需要反射 |
+| **打破双亲委派 + Bootstrap 注入** | Pinpoint | 核心类注入 Bootstrap，插件隔离 | 1. 适配所有自定义类加载器（Tomcat 等）<br>2. 插件访问权限最大 | 1. 风险极高，一旦出错 JVM 直接 crash<br>2. 调试困难 |
+| **Maven Shade 影子类** | OpenTelemetry | 构建时重命名所有依赖包名 | 1. 不涉及类加载器黑科技<br>2. 原理简单，出问题好排查<br>3. 兼容性最好 | 1. Agent JAR 包变大（所有依赖都打进去）<br>2. 构建时间变长<br>3. 堆栈里的类名是 `xxx.shaded.xxx`，可读性差 |
+
+**OTel 为什么选影子类方案？**
+
+OTel 的定位是「标准」，不是「APM 产品」。它需要适配所有 Java 应用（包括各种老应用、奇葩类加载器的应用），**兼容性是第一位**。
+
+```
+OTel 的设计哲学：
+  我不管你的应用用了什么类加载器
+  我也不管你的应用依赖了什么版本的库
+  我把我自己的所有依赖全部重命名
+  → 永远不会和你的业务代码冲突
+```
+
+**代价**：OTel Agent 的 JAR 包有 20MB+（SkyWalking Agent 只有 10MB 左右），因为所有依赖都打进去了。
+
+> ⚠️ **面试题延伸**：三种方案没有绝对的好坏，只是设计哲学不同——SkyWalking 选「保守稳定」，Pinpoint 选「极致适配」，OTel 选「通用兼容」。
 
 ### 4. 字节码增强（ByteBuddy）
 
@@ -499,24 +539,23 @@ ContextManager（线程安全、入口类）
 
 SkyWalking 使用 premain 方式，确保在业务类加载之前就注册好 Transformer。
 
-### Q4: 所有 APM 探针都要做类加载隔离吗？Pinpoint 是怎么做的？
+### Q4: 所有 APM 探针都要做类加载隔离吗？三种主流方案有什么区别？
 
-**是的，所有生产级 APM 都必须做类加载隔离**，否则一定会遇到依赖版本冲突、类重复加载、SPI 污染等问题。
+**是的，所有生产级 APM 都必须做类加载隔离**，否则一定会遇到依赖版本冲突、类重复加载、SPI 污染等问题。但实现思路有三种完全不同的路线：
 
-| APM | 隔离方案 | 特点 |
-|------|---------|------|
-| SkyWalking | AgentClassLoader | 遵循双亲委派，插件独立加载器 | 相对保守，稳定性好 |
-| Pinpoint | IsolatedClassLoader | 打破双亲委派，核心类注入 Bootstrap | 更激进，适配更多坑更多 |
-| Jaeger | 无（SDK 模式，无隔离） | 无隔离，依赖冲突问题较多 |
-| Arthas | SpecializedClassLoader | 打破双亲委派，独立命名空间 |
+| APM | 隔离方案 | 核心原理 | 设计哲学 | 风险等级 |
+|------|---------|---------|---------|---------|
+| SkyWalking | **自定义 ClassLoader** | AgentClassLoader 隔离 Agent 依赖与业务依赖 | 保守稳定 | ★★☆☆☆ |
+| Pinpoint | **打破双亲委派 + Bootstrap 注入** | 核心类注入 Bootstrap ClassLoader，插件独立加载器 | 极致适配 | ★★★★☆ |
+| OpenTelemetry | **Maven Shade 影子类** | 构建时重命名所有依赖包名，从根源避免冲突 | 通用兼容 | ★☆☆☆☆ |
 
-**Pinpoint 的隔离方案的区别：
+**一句话总结三种路线：
 
-1. **打破双亲委派**：先自己加载，找不到再问父要
-2. **Bootstrap 注入**：把核心类注入 Bootstrap ClassLoader，确保所有自定义类加载器都能看到
-3. **插件双重检查**：插件之间也做隔离，避免插件之间的依赖冲突
+- **SkyWalking**：我建一堵墙（ClassLoader），你在墙那边，我在墙这边，互不干扰
+- **Pinpoint**：我爬到最高的地方（Bootstrap），所有人都能看到我，我也能看到所有人
+- **OTel**：我改个名字（shaded），你认不出我，就不会和我冲突了
 
-> ⚠️ 为什么很多人觉得 Pinpoint 更容易导致应用崩溃？——就是因为它打破了双亲委派，且核心类放在 Bootstrap，一旦出问题就是 JVM 级别的崩溃。SkyWalking 的保守设计相对更稳定。
+> ⚠️ OTel 的影子类方案风险最低，但代价是 Agent JAR 包变大（20MB+），且堆栈可读性差。SkyWalking 的 ClassLoader 方案最平衡，Pinpoint 的方案兼容性最强但风险最高。
 
 ### Q5: 如果 Agent 配置错误，会不会导致业务应用启动失败？
 

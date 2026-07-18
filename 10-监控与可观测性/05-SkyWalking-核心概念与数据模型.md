@@ -176,37 +176,59 @@ Trace 的组装过程：
 
 ### 3. Layer（分层）与 Component（组件）
 
+这两个概念常被混淆，先明确它们的区别：
+
+> **Layer 是"你是什么类型的服务"**——跨语言、跨技术栈的分类，不关心具体实现。
+> **Component 是"你用了什么具体的库/框架"**——与语言生态绑定，Java Agent 拦截到的是 SpringMVC，Python Agent 拦截到的是 Django。
+
+比如：MySQL 和 PostgreSQL 的 Component 不同，但 Layer 都是 `DB`；SpringMVC 和 Django 的 Component 不同，但 Layer 都是 `GENERAL`。
+
 #### 3.1 Layer（层级分类）
 
-SkyWalking 将服务按技术栈分类，每种 Layer 有不同的指标和监控重点：
+Layer 是**跨语言、跨技术栈**的服务分类，每种 Layer 有不同的指标和监控重点：
 
-| Layer | 含义 | 指标特点 | 源码定义 |
-|-------|------|---------|---------|
-| **GENERAL** | 通用服务（默认） | 标准 HTTP/RPC 指标 | 默认 |
-| **DB** | 数据库 | 连接数、慢查询、QPS | `Layer.DATABASE` |
-| **MQ** | 消息队列 | 生产/消费速率、积压 | `Layer.MQ` |
-| **CACHE** | 缓存 | 命中率、内存使用 | `Layer.CACHE` |
-| **VIRTUAL_MQ** | 虚拟 MQ（无 Agent 的 MQ） | 通过网络流量推断 | `Layer.VIRTUAL_MQ` |
-| **VIRTUAL_DATABASE** | 虚拟数据库（无 Agent 的 DB） | 通过网络流量推断 | `Layer.VIRTUAL_DATABASE` |
-| **FAAS** | 函数即服务 | 冷启动、调用次数 | `Layer.FAAS` |
-| **GATEWAY** | API 网关 | 路由转发、限流 | `Layer.GATEWAY` |
+| Layer | 含义 | 指标特点 | 跨语言示例 |
+|-------|------|---------|-----------|
+| **GENERAL** | 通用服务（默认） | 标准 HTTP/RPC 指标 | Java(SpringMVC)、Python(Django)、Go(Gin)、Node.js(Express) |
+| **DB** | 数据库 | 连接数、慢查询、QPS | MySQL、PostgreSQL、MongoDB、TiDB、Oracle |
+| **MQ** | 消息队列 | 生产/消费速率、积压 | Kafka、RocketMQ、RabbitMQ、Pulsar |
+| **CACHE** | 缓存 | 命中率、内存使用 | Redis、Memcached、Caffeine |
+| **VIRTUAL_MQ** | 虚拟 MQ（无 Agent 的 MQ） | 通过 Exit Span 推断 | 调用方有 Agent，但 MQ 本身没有安装 Agent |
+| **VIRTUAL_DATABASE** | 虚拟数据库（无 Agent 的 DB） | 通过 Exit Span 推断 | 调用方有 Agent，但 DB 本身没有安装 Agent |
+| **FAAS** | 函数即服务 | 冷启动、调用次数 | AWS Lambda、阿里云函数计算 |
+| **GATEWAY** | API 网关 | 路由转发、限流 | Spring Cloud Gateway、Kong、APISIX、Nginx |
+
+**Layer 的跨语言本质**：不管你的服务是 Java 写的还是 Go 写的，只要它是一个数据库，它在 SkyWalking 中的 Layer 就是 `DB`。这是 SkyWalking 能在**多语言混合架构**中统一展示拓扑图的基础——拓扑图中用同一个数据库图标展示 MySQL 和 PostgreSQL 两个不同节点。
 
 #### 3.2 Component（组件定义）
 
-每个被拦截的框架/库都有一个唯一的 `componentId`：
+Component 是**具体框架/库的标识**，与语言生态绑定。每个被 Agent 拦截的库都有一个唯一的 `componentId`，Agent 在创建 Span 时自动设置。
 
-| Component ID | 组件 | 类型 |
-|-------------|------|------|
-| 14 | SpringMVC | HTTP Server |
-| 38 | Tomcat | HTTP Server |
-| 2 | MySQL | 数据库 |
-| 22 | PostgreSQL | 数据库 |
-| 7 | Redis | 缓存 |
-| 30 | Jedis | 缓存 |
-| 3 | Dubbo | RPC |
-| 23 | gRPC | RPC |
-| 41 | Kafka | 消息队列 |
-| 21 | Spring Cloud Gateway | 网关 |
+**Component 是语言相关的**——不同语言的 Agent 有各自独立的 Component 定义：
+
+| 语言 | HTTP Server 组件 | RPC 组件 | DB 组件 |
+|------|-----------------|---------|---------|
+| **Java** | SpringMVC(14)、Tomcat(38)、Undertow | Dubbo(3)、gRPC(23)、Feign | MySQL(2)、PgSQL(22)、MongoDB |
+| **Python** | Django、Flask、FastAPI | gRPC-Python | mysqlclient、psycopg2 |
+| **Go** | Gin、Echo、net/http | gRPC-Go、Kitex | go-sql-driver、pgx |
+| **Node.js** | Express、Koa、Fastify | gRPC-Node | mysql2、pg |
+
+**Java Agent 中部分 Component ID 示例**（最成熟，内置 100+ 组件）：
+
+| Component ID | 组件 | 类型 | 所属 Layer |
+|-------------|------|------|-----------|
+| 14 | SpringMVC | HTTP Server | GENERAL |
+| 38 | Tomcat | HTTP Server | GENERAL |
+| 2 | MySQL | 数据库 | DB |
+| 22 | PostgreSQL | 数据库 | DB |
+| 7 | Redis | 缓存 | CACHE |
+| 30 | Jedis | 缓存客户端 | CACHE |
+| 3 | Dubbo | RPC | GENERAL |
+| 23 | gRPC | RPC | GENERAL |
+| 41 | Kafka | 消息队列 | MQ |
+| 21 | Spring Cloud Gateway | 网关 | GATEWAY |
+
+> ⚠️ **Component 不等于 Layer**：一个 Component 属于哪个 Layer 是固定的（MySQL 永远是 DB 层），但同一个 Layer 下可以有多种 Component（DB 层下有 MySQL、PostgreSQL、MongoDB 等）。Layer 决定了 SkyWalking 用什么样的指标模板来监控这个服务，Component 决定了 Span 上标记的具体技术栈名称。
 
 ### 4. Tags、Logs 与 Events
 
@@ -325,15 +347,18 @@ Agent 端处理流程：
 - **Local** 独立于服务拓扑，只影响当前服务的内部调用链展示
 - 告警规则可以基于不同 Span 类型配置（如：只告警 Entry Span 的错误）
 
-### Q4: 如何理解 Layer 分层？
+### Q4: 如何理解 Layer 分层？Layer 和 Component 有什么区别？
 
-Layer 是 SkyWalking 对服务的**技术栈分类**，不是业务分类。
+Layer 是 SkyWalking 对服务的**技术栈分类**，**跨语言、跨技术栈**，不关心具体实现。Component 是**具体框架/库的标识**，与语言生态绑定。
+
+**简单记法**：Layer 回答"你是什么？"（数据库、缓存、MQ...），Component 回答"你是谁？"（MySQL、Redis、Kafka...）。MySQL 和 PostgreSQL 的 Component 不同，但 Layer 都是 `DB`。
 
 **为什么需要 Layer？**
 
-1. **不同技术栈的指标不同**：DB 需要监控连接数和慢查询，MQ 需要监控生产和消费速率，通用服务需要监控 HTTP 状态码
-2. **拓扑图展示更清晰**：UI 上可以用不同图标区分不同类型的服务（数据库图标、缓存图标、消息队列图标）
-3. **虚拟服务推断**：当数据库没有被 Agent 探针覆盖时，SkyWalking 可以通过分析 Exit Span 的 `peer` 地址和 `componentId`，推断出虚拟的数据库服务节点
+1. **跨语言统一拓扑**：Java 服务调 MySQL、Go 服务调 PostgreSQL——在拓扑图中它们都是"数据库"图标，Layer 提供统一视图
+2. **不同 Layer 的指标不同**：DB 需要监控连接数和慢查询，MQ 需要监控生产和消费速率，通用服务需要监控 HTTP 状态码
+3. **拓扑图展示更清晰**：UI 上可以用不同图标区分不同类型的服务（数据库图标、缓存图标、消息队列图标）
+4. **虚拟服务推断**：当数据库没有被 Agent 探针覆盖时，SkyWalking 可以通过分析 Exit Span 的 `peer` 地址和 `componentId`，推断出虚拟的数据库服务节点（Layer 自动设为 `VIRTUAL_DATABASE`）
 
 ---
 

@@ -144,6 +144,117 @@ receiver-otel:
 
 **SkyWalking 的兼容策略**：同时支持两种协议，自动检测和转换。
 
+#### 5.1 OTel TraceId → SkyWalking 的完整转换流程
+
+当 OTel SDK 上报 Trace 数据到 SkyWalking OAP 时，转换发生在**两个层面**：**跨服务传播时的 Header 转换**，和 **OAP 接收时的内部格式转换**。
+
+**层面 1：跨服务传播时（Header 转换）**
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  场景：SkyWalking 服务 A 调用 OTel 服务 B（sw8 → W3C）             │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  Service A（SW Agent）发起 HTTP 调用：                              │
+│    Header: sw8 = "1-4bf92f3577b34da6a3ce929d0e0e4736.1.1690000000000-3..."
+│                                                                   │
+│  ↓ 网关/代理层做协议转换（或者 OTel Agent 自动识别 sw8）            │
+│                                                                   │
+│  Service B（OTel Agent）接收：                                      │
+│    Header: traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+│                                                                   │
+│  转换公式：                                                        │
+│    W3C traceId = sw8 traceId 中第一个 "-" 之前的部分（去掉 .threadId.timestamp）│
+│    W3C parentId = sw8 segmentId（UUID，取前 16 字节）              │
+│    W3C trace-flags = sw8 sample 标志（0 或 1）                     │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+反向转换（W3C → sw8）同理：
+
+```
+traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+              ↓
+sw8 traceId = "4bf92f3577b34da6a3ce929d0e0e4736.0." + 当前时间戳
+              (保留 OTel 原始 32 位 hex)  (补 0 占位)   (补当前时间戳)
+```
+
+> ⚠️ **关键结论**：**OTel 的 32 位 hex TraceId 会原样保留**，SkyWalking 不会生成新的 TraceId。只是在需要 sw8 格式时，会在后面补上 `.0.时间戳`（让格式看起来像 SkyWalking 原生的），但存储和查询时用的还是 OTel 原始的 32 位 hex。
+
+**层面 2：OAP 接收时（OTLP Receiver 内部转换）**
+
+OTLP Receiver 收到 OTel 的 `ExportTraceServiceRequest` 后，会做如下转换：
+
+```java
+// 伪代码：OTel Span → SkyWalking SegmentObject
+public SegmentObject convert(InstrumentationLibrarySpans otelSpans) {
+
+    // 1. TraceId 直接复用（OTel 原生 32 位 hex）
+    String swTraceId = otelSpan.getTraceId();  // 不做任何转换！
+
+    // 2. SpanId 也直接复用（OTel SpanId 是 16 位 hex）
+    int swSpanId = hash(otelSpan.getSpanId());  // 哈希成整数（SW 要求 int）
+
+    // 3. parentSpanId 转换：
+    //    OTel parentSpanId（16 位 hex）→ 哈希成整数
+    int swParentSpanId = hash(otelSpan.getParentSpanId());
+
+    // 4. 其他字段映射：
+    //    otelSpan.getName() → operationName
+    //    otelSpan.getKind() → SpanType（Entry/Exit/Local）
+    //    otelSpan.getAttributes() → tags
+    //    otelSpan.getEvents() → logs
+    //    otelSpan.getStatus() → isError
+
+    return SegmentObject.newBuilder()
+        .setTraceId(swTraceId)       // OTel 原生 TraceId！
+        .setTraceSegmentId(...)      // 生成新的 SegmentId（UUID）
+        .setSpans(spans)
+        .build();
+}
+```
+
+**为什么不重新生成 TraceId？**
+
+```
+如果 OAP 重新生成 TraceId，会发生什么？
+
+  Service A（SW Agent）: traceId = abc.1.1690000000000
+        ↓ 调用
+  Service B（OTel Agent）: traceId = 4bf92f3577b34da6a3ce929d0e0e4736
+        ↓ OAP 重新生成
+  OAP 存储的 traceId = xyz.2.1690000000001
+
+结果：两个 Segment 的 traceId 不一样 → 无法组装成一条完整的 Trace → 断链！
+```
+
+**核心原则**：**TraceId 必须是跨服务传播的，不是 OAP 生成的。** 传播协议（sw8 或 W3C）负责把 TraceId 从上游带到下游，OAP 只负责存储，不负责生成。
+
+#### 5.2 混合部署的三种协议模式
+
+| 模式 | 所有服务用什么协议？ | OAP 怎么处理？ | 适用场景 |
+|------|-------------------|---------------|---------|
+| **纯 sw8 模式** | 所有服务用 SkyWalking Agent（sw8） | 原生处理，不需要转换 | 传统 SW 部署 |
+| **纯 W3C 模式** | 所有服务用 OTel Agent（W3C TraceContext） | OTLP Receiver 原生接收 | 新建系统，全 OTel 栈 |
+| **混合模式** | 一部分 sw8，一部分 W3C | 网关层做协议转换，OAP 兼容 | 迁移过渡阶段 |
+
+**混合模式的最佳实践**：
+
+```
+最佳方案：在网关层统一转换（推荐用 OTel Collector）
+
+  入口流量（W3C 协议）
+       │
+       ▼
+  OTel Collector / API Gateway
+       │
+       ├──→ sw8 协议 → SkyWalking Agent 服务
+       └──→ W3C 协议 → OTel Agent 服务
+
+这样整条链路的 TraceId 完全一致，不会出现断链。
+```
+
 ### 6. 迁移策略
 
 ```

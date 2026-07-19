@@ -81,8 +81,11 @@ SkyWalking Java Agent 的插件体系覆盖了 Java 生态中几乎所有主流�
 
 **为什么需要 Bootstrap 插件？**
 - Java 核心类库（如 `java.net.HttpURLConnection`）由 Bootstrap ClassLoader 加载
-- 普通插件由 AgentClassLoader 加载，无法访问 Bootstrap 类
-- Bootstrap 插件通过 `Instrumentation.appendToBootstrapClassLoaderSearch()` 注入到 Bootstrap ClassLoader
+- 普通插件的拦截器由 AgentClassLoader 加载，按可见性规则是 **JDK 核心类（父加载器）看不到 AgentClassLoader（子加载器）的拦截器**
+- 所以普通插件拦截不了 JDK 核心类
+- Bootstrap 插件通过 `Instrumentation.appendToBootstrapClassLoaderSearch()` 把拦截器**注入到 Bootstrap ClassLoader 的搜索路径**，让 JDK 核心类能找到它
+
+> ⚠️ **关键澄清**：SkyWalking 增强极少数 JDK 核心类（只有几个 Bootstrap 插件），而 Pinpoint 大范围增强 JDK 核心类。这是"量"的区别，不是"有/无"的区别。详见第 8 章 3.5、3.7 节的可见性分析。
 
 ### 3. 插件增强四要素
 
@@ -377,12 +380,25 @@ public interface InstanceMethodsAroundInterceptor {
 | 对比维度 | 普通插件 | Bootstrap 插件 |
 |---------|---------|---------------|
 | 类加载器 | AgentClassLoader | Bootstrap ClassLoader |
-| 目标类 | 业务类（如 Spring/Dubbo 类） | JDK 核心类（如 HttpURLConnection） |
-| 加载方式 | 标准 AgentBuilder 增强 | `appendToBootstrapClassLoaderSearch()` |
-| 使用场景 | 拦截第三方框架 | 拦截 JDK 核心 API |
+| 目标类 | 第三方框架类（如 Spring/Dubbo 类） | **JDK 核心类**（如 `HttpURLConnection`、`java.util.logging`） |
+| 加载方式 | 标准 AgentBuilder 增强 | `appendToBootstrapClassLoaderSearch()` 注入 Bootstrap |
+| 数量 | 几十个（绝大多数） | 极少（只有几个，因为要拦截 JDK 核心类） |
+| 使用场景 | 拦截第三方框架 | 拦截 JDK 自带的 API |
 
 **为什么需要 Bootstrap 插件？**
-因为 JDK 核心类（如 `java.net.HttpURLConnection`）由 Bootstrap ClassLoader 加载，AgentClassLoader 无法访问，必须通过特殊方式注入。
+
+因为 JDK 核心类（如 `java.net.HttpURLConnection`）由 **Bootstrap ClassLoader** 加载，而普通插件的拦截器在 AgentClassLoader 里。按照类可见性规则（详见第 8 章 3.7 节）：**Bootstrap（父）看不到 AgentClassLoader（子）的拦截器类**，所以普通插件拦截不了 JDK 核心类。
+
+Bootstrap 插件通过 `Instrumentation.appendToBootstrapClassLoaderSearch()` 把拦截器类**注入到 Bootstrap ClassLoader 的搜索路径**，这样 JDK 核心类才能找到并回调拦截器。
+
+**典型的 Bootstrap 插件例子：**
+- `http-async-client` 相关的 JDK 类增强
+- `java.util.logging` 日志框架增强
+- `java.net.HttpURLConnection` 增强
+
+> ⚠️ **第 8 章的表述澄清**：第 8 章 3.5 节说"SkyWalking 不增强 JDK 核心类"是一种**为了对比 Pinpoint 而做的过度简化**。准确的说法应该是：**SkyWalking 增强极少数 JDK 核心类（通过 Bootstrap 插件），而 Pinpoint 几乎增强所有 JDK 核心类**。两者的区别是"量"的区别，不是"有/无"的区别。
+>
+> 但因为 SkyWalking 增强 JDK 核心类的场景极少（就那么几个 Bootstrap 插件），而 Pinpoint 是大范围增强，所以第 8 章的核心结论仍然成立：**Pinpoint 必须大范围注入 Bootstrap，SkyWalking 只在极少数场景注入 Bootstrap**。
 
 ### Q3: 如何开发一个自定义 SkyWalking 插件？简述关键步骤。
 

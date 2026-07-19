@@ -219,10 +219,10 @@ OTel Agent 构建时：
 
 | 对比维度 | Pinpoint | SkyWalking | OpenTelemetry |
 |---------|---------|-----------|--------------|
-| **增强范围** | 一切方法调用（包括 JDK 核心类） | 只增强框架入口点（不增强 JDK） | 中间增强（比 SW 多，比 Pinpoint 少） |
-| **增强 JDK 核心类** | ✅ 是（如 `java.net.Socket`） | ❌ 否 | ⚠️ 部分（可选） |
-| **对类可见性的要求** | 极高（Bootstrap 也要能看到拦截器） | 中等（只要业务类加载器能看到） | 高（但用影子类绕过去） |
-| **Bootstrap 注入** | ✅ 必须 | ❌ 不需要 | ⚠️ 部分（Agent 核心类） |
+| **增强范围** | 一切方法调用（大范围增强 JDK 核心类） | 绝大多数框架入口点（极少数 JDK 核心类） | 中间增强（比 SW 多，比 Pinpoint 少） |
+| **增强 JDK 核心类** | ✅ 大范围（如 `java.net.Socket`） | ⚠️ 极少数（几个 Bootstrap 插件，如 `HttpURLConnection`） | ⚠️ 部分（可选） |
+| **对类可见性的要求** | 极高（Bootstrap 也要能看到拦截器） | 中等（绝大多数走 AppClassLoader 即可） | 高（但用影子类绕过去） |
+| **Bootstrap 注入** | ✅ 必须（大范围） | ⚠️ 极少数场景（Bootstrap 插件） | ⚠️ 部分（Agent 核心类） |
 | **打破双亲委派** | ✅ 必须 | ❌ 不需要 | ❌ 不需要 |
 
 ---
@@ -269,14 +269,14 @@ Tomcat WebAppClassLoader 故意打破双亲委派：
 
 **② SkyWalking 为什么不需要打破双亲委派？**
 
-**核心诉求：只增强"框架入口点"，不增强 JDK 核心类。**
+**核心诉求：增强"框架入口点"，只在极少数场景增强 JDK 核心类。**
 
 ```
 SkyWalking 的增强策略：
-  ├── 只增强 @RestController / @Service（业务层入口）
-  ├── 只增强 Dubbo Provider / Consumer（RPC 入口）
-  ├── 只增强 JDBC Driver / Redis Client（中间件入口）
-  └── 不增强 JDK 核心类（如 java.net.Socket）
+  ├── 绝大多数插件：增强 @RestController / @Service（业务层入口）
+  ├── 绝大多数插件：增强 Dubbo Provider / Consumer（RPC 入口）
+  ├── 绝大多数插件：增强 JDBC Driver / Redis Client（中间件入口）
+  └── 极少数 Bootstrap 插件：增强 JDK 核心类（如 java.net.HttpURLConnection）
 
   这些入口类的共同点：
     → 都由 AppClassLoader 或 WebAppClassLoader 加载
@@ -286,6 +286,8 @@ SkyWalking 的增强策略：
 ```
 
 结果：**SkyWalking 的插件数量比 Pinpoint 少，但稳定性更好**——Pinpoint 追求"全链路无死角"，SkyWalking 追求"覆盖 99% 场景，牺牲 1% 换稳定性"。
+
+> ⚠️ **澄清一个常见误解**：说"SkyWalking 完全不增强 JDK 核心类"是**过度简化**。准确的说法是：SkyWalking 增强极少数 JDK 核心类（几个 Bootstrap 插件，如拦截 `HttpURLConnection`），绝大多数是第三方框架；Pinpoint 大范围增强 JDK 核心类。两者是**"量"的区别，不是"有/无"的区别**。但因为 SkyWalking 增强 JDK 核心类的场景极少，核心结论仍成立：**Pinpoint 必须大范围注入 Bootstrap，SkyWalking 只在极少数场景注入 Bootstrap**。详见第 9 章 2.3 节 Bootstrap 插件、Q2 的详细说明。
 
 ---
 

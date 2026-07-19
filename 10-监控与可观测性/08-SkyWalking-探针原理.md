@@ -432,7 +432,143 @@ OTel也shade了Guava 31.1（在AgentClassLoader里）
             └─ 可以接受更高开销换取最强适配 → Bootstrap注入
 ```
 
-> 💡 **一句话总结：没有最好的方案，只有最适合场景的方案。工程就是不断地做trade-off！**
+#### 3.7 灵魂拷问：方向搞反了！到底是谁看不到谁？ ⭐⭐⭐⭐⭐
+
+这是90%的人都会搞混的问题，也是理解类加载器可见性的关键！
+
+---
+
+##### 你的问题：方向搞反了！
+
+你问的是：**"我的APM通过AgentClassLoader加载，属于Bootstrap的子加载器，为什么看不到JDK的核心方法和类呢？"**
+
+**答案是：AgentClassLoader 完全能看到 JDK 核心类！** 子加载器能看到父/祖先加载器的类，这是双亲委派的基本规则，从来没有被打破过。
+
+**你真正想问的是（你自己都没意识到方向搞反了）：**
+> "为什么被增强的 JDK 核心类（由 Bootstrap 加载），看不到 AgentClassLoader 里的拦截器类？"
+
+**这才是真正的问题！方向完全反了！**
+
+```
+                    ┌─────────────────────────────────────────┐
+                    │  Bootstrap ClassLoader                  │
+                    │  java.net.Socket、java.lang.String      │
+                    └────────────────────┬────────────────────┘
+                                         │
+                    ┌────────────────────▼────────────────────┐
+                    │  Application ClassLoader                │
+                    │  UserService、OrderService              │
+                    └────────────────────┬────────────────────┘
+                                         │
+                    ┌────────────────────▼────────────────────┐
+                    │  AgentClassLoader                       │
+                    │  TraceInterceptor、Span、Segment        │
+                    └─────────────────────────────────────────┘
+```
+
+**✅ 能看到：子 → 父（下 → 上）**
+- AgentClassLoader（最下层）能看到 Bootstrap 加载的 java.net.Socket
+- 子加载器能看到所有祖先加载器的类，这是双亲委派的基本规则
+
+**❌ 看不到：父 → 子（上 → 下）**
+- Bootstrap 加载的 java.net.Socket，看不到 AgentClassLoader 里的 TraceInterceptor！
+- **这才是Pinpoint必须把拦截器注入到Bootstrap的根本原因！**
+
+---
+
+##### 场景还原：增强 java.net.Socket 时到底发生了什么？
+
+让我们一步步拆解增强过程中到底发生了什么：
+
+```
+第1步：Agent 启动，ByteBuddy 准备增强 Socket
+  ↓
+第2步：ByteBuddy 读取 java.net.Socket 的字节码（由 Bootstrap 加载）
+  ↓
+第3步：ByteBuddy 在 Socket 的 connect() 方法里插入拦截代码
+  ↓
+  插入的代码大致是：
+  public void connect(SocketAddress addr) {
+      TraceInterceptor.intercept(this);  // ← 这里要调用 Agent 的拦截器！
+      // 原来的 connect 逻辑
+  }
+  ↓
+第4步：问题来了！
+  Socket 这个类是由 Bootstrap ClassLoader 定义的
+  当 JVM 执行 connect() 方法时，遇到 TraceInterceptor 这个类
+  JVM 会问："谁加载了 Socket？让 Socket 的类加载器去加载 TraceInterceptor！"
+  ↓
+  Socket 的类加载器是 Bootstrap
+  Bootstrap 去它的搜索路径里找 TraceInterceptor
+  找不到！！！
+  ↓
+第5步：结果：ClassNotFoundException！增强失败！
+```
+
+**这就是问题的本质：不是 Agent 看不到 JDK 的类，而是 JDK 的类看不到 Agent 的类！**
+
+---
+
+##### 一个生活化的类比（看完这辈子都不会忘）
+
+想象一下公司组织架构：
+- **Bootstrap ClassLoader** = 董事长（在顶楼办公）
+- **AgentClassLoader** = 外包团队（在公司外面的办公楼办公）
+
+**✅ 能看到的情况（子 → 父）：**
+- 外包员工（AgentClassLoader）来公司开会，当然能见到董事长（Bootstrap）
+- 子加载器当然能看到父加载器的类，这是天经地义的
+
+**❌ 看不到的情况（父 → 子）：**
+- 董事长（Bootstrap）在自己的办公室开会，想找一个外包员工（TraceInterceptor）
+- 董事长根本不知道外面还有个外包办公楼！去哪里找？
+- 结果：找不到人（ClassNotFoundException）
+
+**Pinpoint 的解决方案是什么？**
+- 把外包员工的工号注册到公司总部的通讯录里（把 TraceInterceptor 注入到 Bootstrap ClassLoader 的搜索路径）
+- 这样董事长找人的时候，一翻通讯录就找到了！
+
+---
+
+##### 延伸思考：为什么普通 Spring 应用不会遇到这个问题？
+
+```
+场景：你想增强 UserController（由 Application ClassLoader 加载）
+  ↓
+UserController 的类加载器 = Application ClassLoader
+  ↓
+AgentClassLoader 是 ApplicationClassLoader 的子加载器吗？
+不！恰恰相反！AgentClassLoader 的父加载器是 ApplicationClassLoader！
+  ↓
+等等，这不是又搞反了吗？
+  ↓
+不！ByteBuddy 会把拦截器注入到被增强类的同一个类加载器里！
+  ↓
+UserController 是 ApplicationClassLoader 加载的
+ByteBuddy 把拦截器也注入到 ApplicationClassLoader 里
+  ↓
+UserController 当然能看到同一个类加载器里的拦截器了！
+  ↓
+所以增强业务类/框架类根本不需要 Bootstrap 注入！
+```
+
+**这就是 SkyWalking 为什么不需要打破双亲委派的第二个原因：** ByteBuddy 会把拦截器注入到目标类的同一个类加载器里，从根源上避免了可见性问题！
+
+---
+
+##### 终极总结表（面试可以直接说）
+
+| 问题 | 答案 |
+|------|------|
+| AgentClassLoader 能看到 JDK 核心类吗？ | ✅ 能！子加载器能看到祖先的类 |
+| JDK 核心类能看到 Agent 的拦截器吗？ | ❌ 不能！父加载器看不到子加载器的类 |
+| 为什么增强业务类不需要 Bootstrap 注入？ | ByteBuddy 把拦截器注入到目标类的同一个类加载器里 |
+| 为什么增强 JDK 核心类必须 Bootstrap 注入？ | 目标类由 Bootstrap 加载，拦截器必须也放在 Bootstrap 里 |
+| 到底是谁看不到谁？ | 父看不到子，不是子看不到父！ |
+
+> **🔥 面试必杀句：** 很多人搞反了类加载器的可见性方向，问题的本质不是Agent看不到JDK的类，而是JDK的类看不到Agent的类——因为类加载器的可见性是单向的，子能看到父，父看不到子。
+
+---
 
 ### 4. 字节码增强（ByteBuddy）
 

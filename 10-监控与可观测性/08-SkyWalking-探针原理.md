@@ -213,7 +213,7 @@ OTel Agent 构建时：
   是完全不同的两个类，不存在版本冲突！
 ```
 
-#### 3.5 灵魂拷问：为什么 Pinpoint 必须打破双亲委派，而 SkyWalking 和 OTel 不需要？
+#### 3.5 灵魂拷问：为什么 Pinpoint 必须打破双亲委派，而 SkyWalking 只局部打破、OTel 不打破？
 
 **根本原因：三者对「类可见性」的要求不同，增强策略不同。**
 
@@ -223,7 +223,7 @@ OTel Agent 构建时：
 | **增强 JDK 核心类** | ✅ 大范围（如 `java.net.Socket`） | ⚠️ 极少数（几个 Bootstrap 插件，如 `HttpURLConnection`） | ⚠️ 部分（可选） |
 | **对类可见性的要求** | 极高（Bootstrap 也要能看到拦截器） | 中等（绝大多数走 AppClassLoader 即可） | 高（但用影子类绕过去） |
 | **Bootstrap 注入** | ✅ 必须（大范围） | ⚠️ 极少数场景（Bootstrap 插件） | ⚠️ 部分（Agent 核心类） |
-| **打破双亲委派** | ✅ 必须 | ❌ 不需要 | ❌ 不需要 |
+| **打破双亲委派** | ✅ 大范围打破（自定义加载顺序 + 大量 Bootstrap 注入） | ✅ **局部打破**（AgentClassLoader 用 child-first 子优先策略，见下文说明） | ❌ 不打破（用影子类绕过） |
 
 ---
 
@@ -267,7 +267,36 @@ Tomcat WebAppClassLoader 故意打破双亲委派：
 
 ---
 
-**② SkyWalking 为什么不需要打破双亲委派？**
+**② SkyWalking 打破双亲委派了吗？打破了，但是"局部、受控"地打破！**
+
+> ⚠️ **重要修正**：之前说"SkyWalking 不需要打破双亲委派"是**不准确**的。准确的说法是：**SkyWalking 也打破了双亲委派，但只在 AgentClassLoader 内部局部打破，不像 Pinpoint 那样全局打破**。
+
+**SkyWalking 打破双亲委派的方式：AgentClassLoader 采用 child-first（子优先）策略**
+
+```
+标准双亲委派（AppClassLoader 等默认加载器）：
+  收到加载请求 -> 先问父加载器 -> 父加载不了 -> 自己才加载
+
+SkyWalking 的 AgentClassLoader（child-first 子优先，打破双亲委派！）：
+  收到加载请求 -> 先自己加载（找自己的 jar） -> 自己加载不了 -> 才问父加载器
+```
+
+**为什么要这样打破？为了 Agent 和业务的依赖隔离：**
+
+```
+业务应用用了 gRPC 1.30
+SkyWalking Agent 用了 gRPC 1.50
+
+如果 AgentClassLoader 遵循双亲委派（先问父）：
+  -> 加载 gRPC 类时，先问 AppClassLoader
+  -> AppClassLoader 加载到了业务的 gRPC 1.30
+  -> Agent 拿到 1.30，调用 1.50 的新方法 -> NoSuchMethodError！
+
+所以 AgentClassLoader 必须 child-first（先自己加载）：
+  -> 加载 gRPC 类时，先在自己的 jar 里找
+  -> 找到 Agent 自己的 gRPC 1.50 -> 用这个！
+  -> 业务的 gRPC 1.30 和 Agent 的 1.50 完全隔离！
+```
 
 **核心诉求：增强"框架入口点"，只在极少数场景增强 JDK 核心类。**
 
@@ -313,7 +342,7 @@ OTel 的思路：
 | APM | 路线 | 一句话总结 |
 |------|------|----------|
 | **Pinpoint** | 打破双亲委派 + Bootstrap 注入 | 我爬到最高的地方，所有人都能看到我，我也能看到所有人 |
-| **SkyWalking** | 自定义 ClassLoader + 遵循双亲委派 | 我建一堵墙，你在那边，我在这边，互不干扰 |
+| **SkyWalking** | 自定义 ClassLoader + child-first 局部打破 | 我建一堵墙，你在那边，我在这边，互不干扰（但墙里我按自己的规矩来） |
 | **OpenTelemetry** | Maven Shade 影子类 | 我改个名字，你认不出我，就不会和我冲突了 |
 
 ---
@@ -554,7 +583,9 @@ UserController 当然能看到同一个类加载器里的拦截器了！
 所以增强业务类/框架类根本不需要 Bootstrap 注入！
 ```
 
-**这就是 SkyWalking 为什么不需要打破双亲委派的第二个原因：** ByteBuddy 会把拦截器注入到目标类的同一个类加载器里，从根源上避免了可见性问题！
+**这就是 SkyWalking 增强业务类时为什么不需要 Bootstrap 注入的第二个原因：** ByteBuddy 会把拦截器注入到目标类的同一个类加载器里，从根源上避免了可见性问题！
+>
+> ⚠️ 注意：这里说的"不需要 Bootstrap 注入"是针对**增强业务类/框架类**而言的。SkyWalking 整体上仍然通过 AgentClassLoader 的 child-first 策略**局部打破了双亲委派**（见 3.5 节②），只是这个"打破"发生在 AgentClassLoader 内部，不需要像 Pinpoint 那样大范围注入 Bootstrap。
 
 ---
 
@@ -962,7 +993,8 @@ ContextManager（线程安全、入口类）
 - Agent 的核心类和第三方依赖放在 `AgentClassLoader` 中
 - `AgentClassLoader` 以 `AppClassLoader` 为父加载器（可以访问业务类）
 - 插件类使用独立的 `PluginClassLoader`（插件之间隔离）
-- 遵循双亲委派模型，但 Agent 的类优先从自己的 ClassLoader 加载
+- **打破双亲委派**：`AgentClassLoader` 采用 **child-first（子优先）** 策略，加载类时先从自己的 jar 里找，找不到才委派给父加载器（AppClassLoader）。这样 Agent 的依赖（如 gRPC 1.50）和业务的依赖（如 gRPC 1.30）完全隔离，互不干扰
+- 插件类使用独立的 `PluginClassLoader`（插件之间也隔离）
 
 ### Q3: premain 和 agentmain 有什么区别？
 
@@ -982,17 +1014,17 @@ SkyWalking 使用 premain 方式，确保在业务类加载之前就注册好 Tr
 
 | APM | 隔离方案 | 核心原理 | 设计哲学 | 风险等级 |
 |------|---------|---------|---------|---------|
-| SkyWalking | **自定义 ClassLoader** | AgentClassLoader 隔离 Agent 依赖与业务依赖 | 保守稳定 | ★★☆☆☆ |
-| Pinpoint | **打破双亲委派 + Bootstrap 注入** | 核心类注入 Bootstrap ClassLoader，插件独立加载器 | 极致适配 | ★★★★☆ |
-| OpenTelemetry | **Maven Shade 影子类** | 构建时重命名所有依赖包名，从根源避免冲突 | 通用兼容 | ★☆☆☆☆ |
+| SkyWalking | **自定义 ClassLoader + child-first 局部打破** | AgentClassLoader 子优先加载，隔离 Agent 依赖与业务依赖 | 局部打破、受控 | ★★☆☆☆ |
+| Pinpoint | **全局打破双亲委派 + 大量 Bootstrap 注入** | 核心类注入 Bootstrap ClassLoader，插件独立加载器 | 全局打破、激进 | ★★★★☆ |
+| OpenTelemetry | **Maven Shade 影子类** | 构建时重命名所有依赖包名，从根源避免冲突 | 不打破、兼容 | ★☆☆☆☆ |
 
 **一句话总结三种路线：
 
-- **SkyWalking**：我建一堵墙（ClassLoader），你在墙那边，我在墙这边，互不干扰
+- **SkyWalking**：我建一堵墙（ClassLoader），墙里我按自己的规矩来（child-first 先自己加载），但不动外面的世界
 - **Pinpoint**：我爬到最高的地方（Bootstrap），所有人都能看到我，我也能看到所有人
 - **OTel**：我改个名字（shaded），你认不出我，就不会和我冲突了
 
-> ⚠️ OTel 的影子类方案风险最低，但代价是 Agent JAR 包变大（20MB+），且堆栈可读性差。SkyWalking 的 ClassLoader 方案最平衡，Pinpoint 的方案兼容性最强但风险最高。
+> ⚠️ OTel 的影子类方案风险最低（完全不碰类加载器），但代价是 Agent JAR 包变大（20MB+），且堆栈可读性差。SkyWalking 的 child-first 方案是局部打破、风险可控、依赖隔离干净，是大多数 APM 的主流选择。Pinpoint 的方案兼容性最强（能增强任何类），但全局打破双亲委派 + 大量 Bootstrap 注入，风险最高。
 
 ### Q5: 如果 Agent 配置错误，会不会导致业务应用启动失败？
 

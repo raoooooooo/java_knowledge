@@ -101,6 +101,143 @@ SkyWalking 的数据上报链路可以归纳为**三条管道 + 四种数据来�
 | **Kafka** | 消息队列 | 高吞吐、解耦 Agent 和 OAP | 9092 | Protobuf | Kafka 消费组 |
 | **HTTP** | REST API | 轻量级、防火墙友好 | 12800 | JSON | 无 |
 
+#### 2.1 灵魂拷问：Agent 数量多了，三种协议的压力怎么办？ ⭐⭐⭐
+
+这是大规模部署（几百上千个 Agent）绕不开的问题。三种协议在"连接压力"和"负载均衡"上表现完全不同：
+
+---
+
+**① gRPC 直连：Agent 多了 OAP 压力大吗？怎么负载均衡？**
+
+**会很大！** 因为 gRPC 是**长连接**，每个 Agent 都会和 OAP 建立一条 TCP 长连接。1000 个 Agent = 1000 条长连接，OAP 要同时维护这些连接。
+
+```
+压力来源：
+  ├── 连接数压力：1000 Agent = 1000 条长连接，OAP 的 fd（文件描述符）会吃紧
+  ├── 心跳压力：每个 Agent 每 30s 一次心跳，1000 Agent = 每秒 ~33 次心跳
+  ├── 流式上报压力：每条连接持续上报数据，OAP 要并发处理
+  └── 注册压力：所有 Agent 启动时同时注册，可能形成"注册风暴"
+```
+
+**怎么负载均衡？两种方案：**
+
+```
+方案A：客户端负载均衡（SkyWalking 默认）
+  Agent 端配置多个 OAP 地址，自己轮询选一个连：
+
+  agent.service_name=xxx
+  collector.backend_service=oap1:11800,oap2:11800,oap3:11800
+                                       ↑
+                            Agent 启动时随机/轮询选一个 OAP 连接
+
+  特点：Agent 主动选 OAP，不需要 LB 中间件，简单
+  问题：连接分布可能不均，某个 OAP 可能被过多 Agent 选中
+
+方案B：服务端负载均衡（L4/L7 负载均衡器）
+  Agent -> Nginx/LB -> OAP 集群
+
+  ┌────────┐     ┌─────────┐     ┌──────────┐
+  │ Agent  │────>│  Nginx  │────>│ OAP 集群  │
+  └────────┘     │ (L4 LB) │     │ (多个节点)│
+                 └─────────┘     └──────────┘
+
+  特点：Nginx 按连接数/轮询分发，连接分布均匀
+  注意：gRPC 基于 HTTP/2，LB 要支持 HTTP/2（Nginx 1.13.10+）
+```
+
+**大规模建议**：
+- Agent 数量 > 几百时，用方案 B（LB 分发）
+- 同时把 OAP 拆成 Receiver + Aggregator 角色（见第 10 章 3.1），Receiver 无状态可任意扩展
+
+---
+
+**② Kafka：连接 Kafka 的 client 数量有限制吗？**
+
+**有限制！这是 Kafka 模式容易被忽略的坑。**
+
+Kafka 模式下，每个 OAP 实例是一个 Kafka 消费者。Kafka 的核心限制是：**一个 Topic 的 Partition 数量 = 该消费组内最大并行消费者数量**。
+
+```
+Kafka 的硬限制：
+  Topic sw-trace 有 3 个 Partition
+  ↓
+  消费组（OAP 集群）内最多只能有 3 个消费者同时消费！
+  ↓
+  如果你部署了 5 个 OAP 节点：
+    ├── OAP-1、OAP-2、OAP-3：各自消费一个 Partition ✅
+    └── OAP-4、OAP-5：空闲！拿不到 Partition，白白部署 ⚠️
+
+  解决：Partition 数 >= OAP 节点数
+  要部署 5 个 OAP，sw-trace 至少要有 5 个 Partition
+```
+
+**还有连接数限制：**
+
+```
+Kafka Broker 的连接数上限（由 Broker 配置决定）：
+  ├── max.connections：单个 Broker 的总连接数上限（默认无上限，但受 fd 限制）
+  ├── max.connections.per.ip：单个 IP 的连接数上限（默认 0=不限）
+  └── 默认每个 OAP 消费者会建多条连接（消费 + 心跳 + 元数据）
+
+  实际经验：
+    - 几十个 OAP 节点 + Kafka 集群：没问题
+    - 上百个 OAP 节点：要调大 Broker 的 fd 和 max.connections
+    - Kafka 模式下 Agent 不直连 OAP，所以 Agent 数量再多也不直接压 OAP
+      （Agent 写 Kafka，OAP 消费 Kafka，压力被 Kafka 集群分摊）
+```
+
+**关键结论**：Kafka 模式下，**Agent 数量不再直接压 OAP，而是压 Kafka 集群**。Kafka 集群可水平扩展，所以 Agent 数量上限远高于 gRPC 直连。但 OAP 节点数不能超过 Partition 数。
+
+---
+
+**③ HTTP：有连接数和并发限制吗？**
+
+**有，而且 HTTP 的连接管理最差**（短连接，频繁建连开销大）。
+
+```
+HTTP 短连接的问题：
+  Agent 每次上报都要建立 TCP 连接 -> 三次握手 -> 发数据 -> 四次挥手
+  ↓
+  开销：
+    ├── 每次上报都要建连，延迟高（gRPC 长连接没有这个开销）
+    ├── TIME_WAIT 状态堆积：大量短连接会耗尽端口（默认 65535 - 1024）
+    ├── OAP 端连接 accept 队列（somaxconn）可能被打满
+    └── 序列化用 JSON，比 Protobuf 大 3-5 倍，带宽浪费
+
+  限制：
+    ├── OAP 端 Tomcat/Netty 线程池大小限制并发请求数
+    ├── Linux 默认 fd 上限（ulimit -n 通常是 1024，生产要调大）
+    └── 短连接端口耗尽（特别是单机大量 Agent 的场景）
+```
+
+**HTTP 模式适合什么场景？**
+- Agent 数量少（几十个以内）
+- 网络环境限制（防火墙只放行 80/443，封了 gRPC 的 11800）
+- 跨语言 SDK（非 Java，没有 gRPC 依赖时）
+
+**HTTP 怎么负载均衡？**
+- 直接用 Nginx/HAProxy 做 L7 负载均衡（HTTP 天然支持，比 gRPC 简单）
+- 或者用 K8s Service（自动负载均衡）
+
+---
+
+**三种协议在大规模部署的对比总结**
+
+| 维度 | gRPC 直连 | Kafka | HTTP |
+|------|----------|-------|------|
+| **Agent 数量上限** | 几百（受 OAP 连接数限制） | 几千+（受 Kafka 集群容量限制） | 几十（受端口/fd 限制） |
+| **OAP 连接压力** | 大（每 Agent 一条长连接） | 小（OAP 只连 Kafka，不连 Agent） | 中（短连接，但频繁建连） |
+| **负载均衡方式** | 客户端轮询 / L4 LB | Kafka 分区自动分摊 | L7 LB（Nginx） |
+| **水平扩展瓶颈** | OAP 节点的 fd 和连接数 | OAP 节点数 ≤ Partition 数 | OAP 端口数和 fd |
+| **延迟** | 最低（长连接） | 较高（多一跳 Kafka） | 中（建连开销） |
+| **适用规模** | 中小规模（< 500 Agent） | 大规模（500+ Agent） | 小规模或受限环境 |
+
+> 💡 **选型建议**：
+> - **Agent < 500**：gRPC 直连 + 客户端负载均衡（简单够用）
+> - **Agent 500-2000**：gRPC 直连 + Nginx L4 负载均衡 + OAP 拆 Receiver/Aggregator
+> - **Agent > 2000 或要求高可靠**：Kafka 桥接（压力分摊到 Kafka 集群，OAP 按需消费）
+> - **网络受限/跨语言**：HTTP（但要注意端口和 fd 调优）
+
 ### 3. gRPC 上报（默认方式）
 
 #### 3.1 通信模型

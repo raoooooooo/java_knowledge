@@ -570,6 +570,108 @@ UserController 当然能看到同一个类加载器里的拦截器了！
 
 ---
 
+#### 3.8 灵魂拷问进阶：Agent 能直接 new Socket()，为什么非要增强它？ ⭐⭐⭐⭐⭐
+
+这是上一节的进阶问题，也是99%的人学完可见性后的下一个困惑：
+
+> **"既然子加载器（AgentClassLoader）能看到父加载器（Bootstrap）的 Socket，那 Agent 代码里直接 `new Socket()` 用 Socket 不就行了？为什么非要把拦截器注入到 Bootstrap？"**
+
+**答案：你混淆了两个完全不同的场景--主动调用 vs 被动回调！**
+
+---
+
+##### 两个场景的对比
+
+| 场景 | 谁调用谁 | 方向 | 能不能行？ | 例子 |
+|------|---------|------|----------|------|
+| **A. Agent 主动用 Socket** | Agent代码里 `new Socket()` | 子调父（下->上） | ✅ 完全可以 | Agent 想发个 HTTP 请求，用 Socket |
+| **B. Socket 回调 Agent 拦截器** | 增强 Socket 后，Socket 执行时通知 Agent | 父调子（上->下） | ❌ 不行 | APM 想监控业务怎么用 Socket |
+
+**APM 增强的本质是场景B，不是场景A！**
+
+---
+
+##### 生活化类比：明星和粉丝
+
+- **Socket** = 明星（Bootstrap加载的，公众人物，大家都认识）
+- **Agent 拦截器** = 你这个粉丝（AgentClassLoader加载的，明星不认识你）
+
+**✅ 场景A：你看明星（Agent主动调用Socket）**
+- 你（粉丝）看电视、刷微博看明星 -> 你能看到明星 ✅
+- Agent代码里 `new Socket()` 调用Socket -> 完全可以 ✅
+- **这就是"子加载器能看到父加载器"！**
+
+**❌ 场景B：明星感谢你（Socket回调Agent拦截器）**
+- 明星在演唱会上想感谢你这个粉丝 -> 但明星根本不知道你是谁！❌
+- Socket被增强后，connect()时想通知拦截器 -> Socket看不到拦截器！❌
+- **这就是"父加载器看不到子加载器"！**
+
+**Pinpoint的解决方案：** 把你这个粉丝的名字加到演唱会的嘉宾名单里（把拦截器注入到Bootstrap的搜索路径），这样明星一翻嘉宾名单就能找到你了 ✅
+
+---
+
+##### 关键追问：那为什么不直接用场景A？非要搞场景B？
+
+你可能会想：**"那我Agent代码里直接 `new Socket()` 不就行了，干嘛非要增强Socket？"**
+
+这个问题非常深刻！答案在于 **APM的核心价值 = 无侵入监控**：
+
+```
+方案1：包装Socket（场景A的思路）
+  ┌──────────────────┐
+  │ MySocketWrapper   │  ← 你写的包装类
+  │  - 持有 Socket    │
+  │  - connect() {    │
+  │      记日志       │
+  │      socket.connect()│
+  │    }              │
+  └──────────────────┘
+
+  问题1：业务代码用的是 Socket，不是 MySocketWrapper！
+         你得让所有业务代码都改成用 MySocketWrapper -> 侵入式！要改代码！
+  问题2：业务可能通过 HttpClient 间接用 Socket，你包不住所有的入口！
+
+方案2：增强Socket（场景B，APM的真正做法）
+  ┌──────────────────┐
+  │ Socket           │  ← Bootstrap加载的，所有业务都在用
+  │  connect() {      │
+  │    拦截器.通知()   │  ← 插入钩子，监控所有业务对Socket的使用
+  │    原来的connect逻辑│
+  │  }                │
+  └──────────────────┘
+
+  优势：业务代码完全不用改！所有用Socket的地方都被监控了！
+  代价：Socket要回调拦截器，Socket看不到拦截器 -> 必须注入Bootstrap
+```
+
+**APM的核心价值是"我监控你，但你不用改代码"--这就注定了必须走增强（场景B）这条路，而不是包装（场景A）这条路！**
+
+---
+
+##### 终极总结：为什么APM必须搞这么复杂？
+
+```
+1. APM的目标：无侵入监控业务对各种库的调用
+       ↓
+2. 无侵入 = 不能让业务改代码，只能在库的内部插入监控代码
+       ↓
+3. 在库内部插入代码 = 增强库的类（比如 Socket）
+       ↓
+4. 增强后的Socket要回调Agent的拦截器
+       ↓
+5. Socket由Bootstrap加载，拦截器由AgentClassLoader加载
+       ↓
+6. Bootstrap（父）看不到AgentClassLoader（子）的拦截器
+       ↓
+7. 必须把拦截器注入到Bootstrap，让Socket能找到它
+       ↓
+这就是为什么Pinpoint必须打破双亲委派、必须注入Bootstrap的根本原因！
+```
+
+> **🔥 终极面试必杀句：** APM要监控的不是"Agent怎么用Socket"，而是"业务怎么用Socket"。前者是Agent主动调用（子调父，可以），后者是Socket被动通知Agent（父调子，不行）。无侵入监控的要求，注定了APM必须走"增强Socket让它回调拦截器"这条路，也就注定了必须解决"父看不到子"的可见性问题--这就是Pinpoint注入Bootstrap、SkyWalking用ByteBuddy把拦截器注入到目标类加载器的根本原因。
+
+---
+
 ### 4. 字节码增强（ByteBuddy）
 
 #### 4.1 为什么选择 ByteBuddy？

@@ -94,6 +94,15 @@ SkyWalking v9+ **原生支持** OpenTelemetry 协议，主要体现在：
 
 **适用场景**：已经使用 OTel SDK 的应用，想利用 SkyWalking 的分析和 UI 能力。
 
+> ⚠️ **选型权衡（高频追问）**：方案 B 会丢失 SkyWalking Agent 的「动态采样率下发」能力。原因：SkyWalking OAP 的 `ConfigurationDiscoveryServiceHandler` 只认自家 sw8 协议的 `fetchConfigurations`，**没实现 Jaeger 的 `GetSamplingStrategy`**；而 OTel SDK 内置 Sampler（`TraceIdRatioBased` 等）标 `@Immutable final`，运行时不可变，换采样率 = 换 Sampler 实例 = 重建 TracerProvider = 实质重启。所以 OTel SDK 搭 SkyWalking OAP 时，**Agent 前置动态采样失效，只能静态配采样率，改要重启**。
+>
+> 但 **OAP 后置采样仍然有效**：`forceSampleErrorSegment`（错误段强制保留）、慢阈值这些是 OAP 收到数据后的行为，与用哪个 SDK 上报无关，错误/慢请求的强制保留不会丢。
+>
+> 三条补救出路（按推荐度）：
+> - **A. 加 OTel Collector 做采样中间层**：Collector 部署 `jaegerremotesampling` 扩展 + 本地 JSON 热重载，SDK 端配 `JaegerRemoteSampler` 去 poll Collector（**不是 OAP**）。最接近 SkyWalking 原体验，默认 60s 轮询。
+> - **B. Collector 尾部采样 `tailsamplingprocessor`**：SDK 全量上报，Collector 看完整 Trace 再筛（含错误的 Trace 全留）。代价是不省 SDK->Collector 带宽，且要求同一 Trace 的 span 落同一 Collector 实例。
+> - **C. 自研 Sampler**：实现 `Sampler` 接口，内部监听 Nacos/Apollo，`volatile` delegate 热替换。等于把 SkyWalking Agent 那套搬到 OTel 侧。
+
 #### 3.3 方案 C：全链路 OTel
 
 ```

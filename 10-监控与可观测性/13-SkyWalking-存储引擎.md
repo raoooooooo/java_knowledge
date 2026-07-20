@@ -189,7 +189,52 @@ ES 索引命名规则：{namespace}_{metric_name}-{YYYYMMDD}
 | `bulkActions` | 5000 | 批量提交，减少网络开销 |
 | `concurrentRequests` | 2 | 控制并发写入，避免 ES 过载 |
 
-#### 4.5 优缺点
+#### 4.5 写入放大：为什么 ES 在 APM 场景下"写"得吃力
+
+对比表里提到「索引 + 倒排 -> 10x 写入放大」，这里展开讲清楚放大从哪来。两层叠加：
+
+**第一层：同一份数据存成多个结构**
+
+ES 基于 Lucene，一条文档落盘时不是只写一次，而是同时存成好几种数据结构：
+
+| 数据结构 | 作用 | 说明 |
+|------|------|------|
+| `_source` | 原始 JSON 全文 | 用于 GET 返回原文，1 份冗余 |
+| 倒排索引（Inverted Index） | 每个 `index:true` 字段各建一份 | 全文搜索的基础，**放大主源** |
+| `doc_values` | 列式正排 | 排序、聚合用，默认非 text 字段都开 |
+| BKD-Tree | 数值/地理/IP 范围查询 | 数值类型有 |
+| `translog` | 预写日志 WAL | 先落盘再入内存 buffer |
+
+一个文档有 N 个索引字段，就要建 **N 份倒排**，再加上 `_source`、`doc_values`，同一条数据在磁盘上存了 3~5 遍。
+
+**第二层（更隐蔽、更致命）：Lucene Segment 合并重写**
+
+```
+写入 → indexing buffer(内存)
+  → refresh(默认1s，APM调到30s) → 刷成不可变 segment
+  → segment 堆积 → 后台 merge 合并成大 segment
+  → ⚠️ 合并时读出旧 segment、再写入新 segment，旧 segment 才能删
+```
+
+一次数据在它的生命周期里可能被**重写 3~5 次**，这部分磁盘 I/O 是"白干"的——业务只写一份，磁盘实际写了好多份。
+
+**放大系数粗算：**
+
+```
+_source(1x) + 倒排(2~4x) + doc_values(0.5~1x) + merge重写(2~3x) + translog(0.1~0.5x) + replica(1x)
+≈ 5~10x，字段多、索引多的 APM 场景偏 10x
+```
+
+**为什么 APM 场景尤其痛：**
+
+- APM 是**写密集**型（trace/log 海量写入），写放大直接放大磁盘 I/O、CPU、GC 压力
+- SkyWalking 默认大量字段建索引（`searchableTracesTags`、`searchableLogsTags` 一堆 tag），倒排开销巨大
+- APM 查询模式是「按时间范围 + 维度聚合」，**根本用不到全文搜索**，等于为不需要的能力付写入代价
+- 这正是 BanyanDB 的出发点：列式存储不建倒排、不重复存 `_source`、LSM-Tree 顺序写 + 可控合并，写放大压到 1~2x
+
+> 💡 **面试答"ES 写放大"三要点**：① 多数据结构并存（`_source`/倒排/`doc_values`/BKD）② Lucene segment merge 重写 ③ APM 写密集 + 字段多索引多，三因叠加到 10x。
+
+#### 4.6 优缺点
 
 | 优点 | 缺点 |
 |------|------|
@@ -251,8 +296,14 @@ BanyanDB 存储引擎设计：
 | 数据类型 | 存储模型 | 特点 |
 |---------|---------|------|
 | **Measure** | 列式存储 | 指标数据（如 service_cpm），按时间戳 + 标签分组，支持压缩 |
-| **Stream** | 行式存储 | 记录数据（如 Trace/Segment），按 TraceId 索引，支持全文搜索 |
+| **Stream** | 行式存储 | 记录数据（日志/Trace/Segment/告警），按 TraceId 等维度建 tag 索引 |
 | **Property** | 文档型存储 | 元数据（如 Service 信息），低频率更新 |
+
+> ⚠️ **日志存哪里（高频追问点）**：用 BanyanDB 时，**日志仍存在 BanyanDB 里**，但走的是 **Stream 模型（行式存储）**，而不是存指标的 Measure 模型（列式）。这是 BanyanDB 与 ES 最大的架构差异--ES 一切皆倒排索引，BanyanDB 按**访问模式分两套模型**：指标按列聚合（Measure），日志/Trace 整条存取（Stream）。源码 `BanyanDBLogQueryDAO` 注释直接写明 `LogRecord is a stream`。
+>
+> **能检索正文 ≠ ES 级全文搜索**：BanyanDB 把日志正文 `CONTENT` 也作为 tag，支持关键词检索，但实现是 tag 精确/前缀匹配，**不是 ES 那种分词 + 倒排 + 相关性打分**。复杂日志搜索场景仍需配 ES 或专门日志栈。这是用 BanyanDB 替代 ES 时必须评估的取舍。
+>
+> 日志 Stream 的可索引 tag：`service_id / service_instance_id / endpoint_id / trace_id / timestamp / content_type / content / tags`，写入走 `StreamBulkWriteProcessor`，查询走 `BanyanDBLogQueryDAO`。
 
 #### 5.4 列式存储的优势
 

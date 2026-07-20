@@ -6,23 +6,26 @@
 
 #### 1.1 MAL 是什么？
 
-**MAL（Meter Analysis Language）** 是 SkyWalking 用于分析 **Meter（计量器）指标** 的 DSL。与 OAL（分析 Trace 数据）不同，MAL 专注于分析从外部系统接入的 Meter 数据。
+**MAL（Meter Analysis Language）** 是 SkyWalking 用于分析 **Meter（计量器）指标** 的 DSL。与 OAL（分析 Source 对象）不同，MAL 专注于分析 **Meter 时间序列指标流**。
+
+> ⚠️ **资料勘误**：常见说法称"MAL 专注分析从外部系统接入的 Meter 数据"，这是不准确的。MAL 处理的是所有 Meter 格式的指标，来源既包括**外部采集器**（Prometheus/OTel/Telegraf/Zabbix），也包括 **SkyWalking Agent 自身的 meter 插件**（micrometer/spring-sleuth）。本文 1.2 的 `spring-sleuth.yaml` 示例正是 Agent 内部上报的 JVM 指标，并非外部系统。OAL 与 MAL 的真正分界线是**数据范式**——OAL 处理离散的 Source 实体，MAL 处理时间序列指标流，而非"内部 vs 外部"。详见文末「资料勘误与重点提醒」。
 
 ```
 OAL vs MAL 对比：
 
 ┌──────────────────────────────────────────────────────────────┐
 │  OAL（Observability Analysis Language）                       │
-│  ├── 数据来源：Trace Segment（Agent 上报）                    │
-│  ├── 分析对象：Service/Endpoint/Relation 等 Source            │
+│  ├── 分析对象：Source 离散实体（Service/Endpoint/Relation）  │
+│  ├── 数据来源：Trace Segment（Agent）+ Envoy ALS（Mesh 无 Trace）│
+│  ├── 风格：声明式 from(Source.*).sum(...)                    │
 │  ├── 输出：标准化的 APM 指标                                   │
 │  └── 示例：service_cpm = from(Service.*).sum(1)              │
 │                                                              │
 │  MAL（Meter Analysis Language）                               │
-│  ├── 数据来源：Meter 数据（Prometheus/OTel/Telegraf/Zabbix）  │
-│  ├── 分析对象：自定义指标（Counter/Gauge/Histogram）           │
-│  ├── 输出：标准化的 SkyWalking Meter 指标                      │
-│  └── 示例：过滤和聚合 Prometheus 指标                          │
+│  ├── 分析对象：Meter 时间序列流（Counter/Gauge/Histogram）   │
+│  ├── 数据来源：Agent meter 插件 + 外部采集器（Prometheus/OTel/Telegraf/Zabbix）│
+│  ├── 风格：表达式式（类 PromQL，exp 字段）                   │
+│  └── 输出：标准化的 SkyWalking Meter 指标                      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -231,13 +234,13 @@ service_cpm{service='order-service'}.compare(service_cpm{service='user-service'}
 
 ### Q1: OAL、MAL、LAL 三者有什么区别？
 
-| 语言 | 全称 | 数据来源 | 作用 |
+| 语言 | 全称 | 分析对象 / 数据来源 | 作用 |
 |------|------|---------|------|
-| **OAL** | Observability Analysis Language | Trace Segment | 分析 Trace 数据，生成 APM 指标 |
-| **MAL** | Meter Analysis Language | Meter（Prometheus/OTel） | 分析外部 Meter 指标 |
+| **OAL** | Observability Analysis Language | Source 离散实体（来自 Trace Segment，或 Mesh 模式下 Envoy ALS） | 分析 Source 数据，生成 APM 指标 |
+| **MAL** | Meter Analysis Language | Meter 时间序列流（来自 Agent meter 插件 + 外部采集器） | 分析 Meter 指标 |
 | **LAL** | Log Analysis Language | 原始日志 | 解析日志，提取结构化信息和指标 |
 
-**三者关系**：OAL 处理 Trace 来源的指标，MAL 处理外部 Meter 来源的指标，LAL 处理日志来源的指标。三者互补，覆盖可观测性三大支柱（Traces、Metrics、Logs）。
+**三者关系**：OAL 处理 Source 来源的指标，MAL 处理 Meter 来源的指标，LAL 处理日志来源的指标。三者互补，覆盖可观测性三大支柱（Traces、Metrics、Logs）。
 
 ### Q2: 如何将 TraceId 关联到日志中？
 
@@ -263,3 +266,57 @@ service_cpm{service='order-service'}.compare(service_cpm{service='user-service'}
 - MAL 配置文档：[https://skywalking.apache.org/docs/main/latest/en/setup/backend/meter-analyzer/](https://skywalking.apache.org/docs/main/latest/en/setup/backend/meter-analyzer/)
 - LAL 配置文档：[https://skywalking.apache.org/docs/main/latest/en/setup/backend/log-analyzer/](https://skywalking.apache.org/docs/main/latest/en/setup/backend/log-analyzer/)
 - MQE 语法文档：[https://skywalking.apache.org/docs/main/latest/en/api/metrics-query-expression/](https://skywalking.apache.org/docs/main/latest/en/api/metrics-query-expression/)
+
+---
+
+## 资料勘误与重点提醒
+
+### 1. MAL 的数据来源不是"仅限外部系统"
+
+**资料原表述**："MAL 专注于分析从外部系统接入的 Meter 数据。"
+
+**问题**：把 MAL 限定为"外部"会让人误以为它不处理 Agent 自己上报的指标，而事实恰好相反。MAL 处理的是**所有 Meter 格式的时间序列指标流**，数据来源分两类：
+
+| 来源 | 具体渠道 | 是否"外部" |
+|------|---------|-----------|
+| **Agent meter 插件** | Java Agent 的 `micrometer`、`spring-sleuth` 插件；通过 meter 协议（OTLP meter）上报的 JVM/业务指标 | ❌ 内部 |
+| **外部采集器** | Prometheus（OpenFetcher / VM）、OTel Collector、Telegraf、Zabbix | ✅ 外部 |
+
+**判别依据**：本文 1.2 配置示例的文件名 `spring-sleuth.yaml` 对应 SkyWalking Java Agent 的 `spring-sleuth` meter 插件，示例中的 `jvm_memory_used_bytes` 是 Agent 内部上报的 JVM 指标--这本身就否定了"MAL 只接外部"的说法。
+
+### 2. OAL 与 MAL 的真正分界线是"数据范式"，不是"内外"
+
+| 维度 | OAL | MAL |
+|------|-----|-----|
+| **数据范式** | 离散实体（Source 对象） | 时间序列（指标流） |
+| **分析对象** | Service / Endpoint / Instance / Relation 等 Source | Counter / Gauge / Histogram 等 Meter |
+| **语法风格** | 声明式 `from(Source.*).sum(...)` | 表达式式（类 PromQL，`exp` 字段） |
+| **输出** | APM 聚合指标（CPM/P99/SLA） | 标准化 Meter 指标 |
+
+记住一句话：**"OAL 管'实体'，MAL 管'指标流'"**，比"OAL 管 Trace，MAL 管外部 Meter"更准确。
+
+### 3. OAL 也不只是"分析 Trace 数据"
+
+**资料原表述**："OAL（分析 Trace 数据）"。
+
+**问题**：OAL 分析的是 **Source 对象**，Source 的数据来源不止 Trace：
+
+- **普通 Agent 模式**：来自 Trace Segment ✅
+- **Service Mesh 模式**：来自 Envoy **ALS 访问日志**，根本没有 Trace（参见第 17 章 ALS 章节），OAL 照样能跑
+
+所以严谨说法是「OAL 分析 Source 对象（主要来自 Trace，也来自 ALS 等）」，而非"分析 Trace 数据"。
+
+### 4. LAL 的语法说明（避免被资料误导）
+
+资料中 LAL 脚本以 Groovy 风格展示（`filter { text { regexp ... } }`），仅作为**结构示意**。实际 LAL 的 DSL 语法以官方文档为准（见延伸阅读第 2 条），不同版本语法差异较大，面试时不必纠结具体关键字拼写，把握"过滤 → 解析（regexp/json）→ 提取（tag/metrics）→ 采样（sampler）"四个阶段即可。
+
+### 5. 面试高频补充：四套 DSL 速记
+
+| DSL | 处理的"东西" | 一句话记忆 |
+|-----|-------------|-----------|
+| OAL | Source 实体 | "从调用链实体聚出 APM 指标" |
+| MAL | Meter 时间序列 | "把外部/Agent 的指标流接入并标准化" |
+| LAL | 原始日志 | "把非结构化日志解析成结构化数据 + 指标" |
+| MQE | 查询 | "查指标时的类 SQL 表达式引擎" |
+
+> 注：MQE 是**查询侧**的语言（读），OAL/MAL/LAL 是**采集/分析侧**的语言（写）。面试时点出这个"读写分离"的定位，能体现对架构的理解深度。

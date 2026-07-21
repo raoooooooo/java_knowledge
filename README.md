@@ -183,6 +183,23 @@
 
 ---
 
+### 14 - AI与大模型
+
+> AI/Agent 专题。覆盖 LLM 基础与提示范式、RAG 与向量检索、Agent 核心原理（记忆/上下文/反思/能力体系）、多 Agent 架构、Agent 开发框架、Agent 通信协议生态（MCP/A2A/ACP/AG-UI）、ClaudeCode 与 Harness 原理、工程化与生产部署。
+
+| 文件 | 核心内容 |
+|------|---------|
+| [01-LLM基础与提示工程.md](./13-AI与大模型/01-LLM基础与提示工程.md) | LLM定义/涌现能力、训练三段式(预训练/SFT/RLHF-DPO)、Token/上下文窗口/幻觉、能力边界、提示工程原则、推理范式(CoT/ToT/GoT/Self-Consistency/ReAct/Reflexion/Plan-Execute/Loop)对比 |
+| [02-RAG与向量检索.md](./13-AI与大模型/02-RAG与向量检索.md) | RAG三阶段/三代演进(Naive->Advanced->Modular)、Chunking、Embedding、向量数据库选型(Milvus/Faiss/Pinecone/Qdrant等)、HNSW/IVF、混合检索、Rerank、Self-RAG/CRAG/RAPTOR/GraphRAG/LightRAG/Agentic RAG、LlamaIndex、RAGAS评测、上下文压缩 |
+| [03-Agent核心原理.md](./13-AI与大模型/03-Agent核心原理.md) | Agent本质(Agent vs Chatbot vs Workflow)、Agent Loop、上下文工程(写入/选择/压缩/隔离/遗忘)、长短期记忆(工作/情景/语义/程序)、任务规划、工具调用(Function Calling与MCP关系)、自我反思、四层Agent能力体系(基础/核心/工程部署/安全合规) |
+| [04-多Agent架构.md](./13-AI与大模型/04-多Agent架构.md) | 单Agent瓶颈、四种多Agent架构(层级监督者/网络协作/竞争辩论/编排流水线)对比、通信机制(直接调用/共享State/消息总线/A2A-ACP协议)、MetaGPT/AutoGen/CrewAI/AgentScope/LangGraph案例、设计取舍 |
+| [05-Agent开发框架.md](./13-AI与大模型/05-Agent开发框架.md) | LangChain全家桶(LangChain/LangGraph/LangSmith/LangServe)、LangGraph State/Node/Edge/Checkpointer、AgentScope(阿里分布式)、AutoGen(对话式)、CrewAI(角色驱动)、Skill机制(渐进式披露)、框架选型矩阵 |
+| [06-协议生态-MCP-A2A-ACP-AGUI.md](./13-AI与大模型/06-协议生态-MCP-A2A-ACP-AGUI.md) | SSE原理(与WebSocket/轮询对比)、MCP(Host/Client/Server架构/Tools-Resources-Prompts/stdio与Streamable HTTP/与Function Calling关系)、A2A(Google/Agent Card/Task/与MCP互补)、ACP(异步消息企业级)、AG-UI(Agent与前端交互)、协议三角互补矩阵 |
+| [07-ClaudeCode与Harness原理.md](./13-AI与大模型/07-ClaudeCode与Harness原理.md) | Harness定义(运行时编排/模型是大脑Harness是身体)、Agent Loop真实运行、自动压缩Auto-Compact、子Agent隔离Task、多Agent并行Workflow、工具系统(MCP扩展)、Skill落地、权限沙箱、Hooks、计划模式、与Cursor/Cline/Devin对比 |
+| [08-Agent工程化与生产部署.md](./13-AI与大模型/08-Agent工程化与生产部署.md) | 可视化编排(Dify/Coze/FastGPT/LangFlow)、LLM可观测(Trace/Token/延迟/LangSmith-Langfuse-Phoenix)、评测Eval(LLM-as-Judge/RAGAS/在线AB)、API网关、多模型路由(级联/降级/缓存)、Agent注册中心与灰度发布、安全合规(内容审核/权限RBAC/Prompt注入防护/PII脱敏/Agent特有风险)、生产部署架构 |
+
+---
+
 ## 使用说明
 
 - 每个文件先列出核心概念和常见面试题的**大纲**

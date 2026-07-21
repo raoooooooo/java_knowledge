@@ -43,7 +43,9 @@
 
 ---
 
-### 04 - 数据库（OLTP）
+### 04 - 数据库
+
+> 数据库大类：含关系型 OLTP（MySQL）与搜索型/文档型 NoSQL（Elasticsearch）。
 
 | 文件 | 核心内容 |
 |------|---------|
@@ -51,6 +53,13 @@
 | [02-索引与优化.md](./04-数据库/02-索引与优化.md)  | B+树索引、索引底层原理、聚簇索引/非聚簇索引、回表、覆盖索引、最左前缀原则、索引失效场景、Explain |
 | [03-事务与锁.md](./04-数据库/03-事务与锁.md)  | ACID、隔离级别、MVCC、锁分类、行锁/表锁、Gap锁、意向锁、死锁 |
 | [04-SQL优化.md](./04-数据库/04-SQL优化.md)  | 慢查询分析、SQL优化技巧、分页优化、Join优化、子查询优化 |
+#### Elasticsearch 系列（`04-数据库/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [05-Elasticsearch基础与架构.md](./04-数据库/05-Elasticsearch基础与架构.md) | ES定位(搜索引擎+文档NoSQL)、概念模型(Index/Doc/Mapping/Shard/Replica对照MySQL)、节点角色(Master/Data/Coordinating/Ingest)、主分片与副本、路由公式(hash(routing)%主分片数)、分片数选择、集群健康状态、选主与脑裂(7.0+自动规避)、ES vs MySQL对比、MySQL同步ES(Canal/binlog) |
+| [06-Elasticsearch索引与读写原理.md](./04-数据库/06-Elasticsearch索引与读写原理.md) | 倒排索引(Term Dictionary/Term Index FST/Posting List压缩FOR+RoaringBitmap)、Doc Values列式正排、分词器Analyzer三段式(char filter/tokenizer/token filter)与ik中文分词、写入分词vs搜索分词、Mapping(text vs keyword/动态vs显式/字段类型不可改)、写入流程(refresh/flush/translog/NRT/segment不可变+merge+标记删除)、读取流程(query then fetch两阶段)、相关性打分(TF-IDF->BM25) |
+| [07-Elasticsearch查询与调优.md](./04-数据库/07-Elasticsearch查询与调优.md) | Query DSL(query vs filter缓存)、bool四子句(must/filter/should/must_not)、term查text搜不到坑、聚合(Bucket/Metric/Pipeline)、深分页(from+size/scroll/search_after/PIT)、索引/查询/写入/JVM调优、集群运维(健康状态/未分配原因/Recovery/ILM脑裂)、写放大回顾(5~10x/与BanyanDB对比)、ES vs ClickHouse vs MySQL选型、资料勘误(type已弃用等) |
 
 ---
 

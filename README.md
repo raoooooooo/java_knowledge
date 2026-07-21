@@ -35,11 +35,18 @@
 
 ### 03 - Spring全家桶
 
+#### Spring核心系列（`03-Spring全家桶/`）
+
 | 文件 | 核心内容 |
 |------|---------|
-| [01-Spring核心.md](./03-Spring全家桶/01-Spring核心.md)  | IoC容器、Bean生命周期、依赖注入、AOP原理、事务、Spring事务传播机制 |
-| [02-SpringBoot.md](./03-Spring全家桶/02-SpringBoot.md)  | 自动配置原理、启动流程、Starter、配置文件加载顺序、条件注解 |
-| [03-SpringCloud.md](./03-Spring全家桶/03-SpringCloud.md)  | 服务注册与发现、服务调用、配置中心、网关、熔断降级、分布式链路追踪 |
+| [01-Spring核心-IoC与Bean生命周期.md](./03-Spring全家桶/01-Spring核心-IoC与Bean生命周期.md) | IoC思想(控制反转什么)、容器体系(BeanFactory vs ApplicationContext懒加载vs预实例化)、BeanDefinition图纸、Bean完整生命周期13步(BeanFactoryPostProcessor->实例化->属性填充->Aware->BeanPostProcessor前置->@PostConstruct->afterPropertiesSet->init-method->BeanPostProcessor后置/AOP在此->销毁)、Bean注册方式(@Component/@Bean/@Import三用法/FactoryBean)、核心扩展点 |
+| [02-Spring核心-循环依赖与三级缓存.md](./03-Spring全家桶/02-Spring核心-循环依赖与三级缓存.md) | 循环依赖类型与能否解决(构造器/Setter/字段/prototype)、三级缓存源码(singletonObjects/earlySingletonObjects/singletonFactories)、A->B->A完整时序图、为什么三级而非二级(AOP延迟代理+循环依赖折中)、@Lazy解法、Spring Boot 2.6默认禁循环依赖、@Async不实现getEarlyBeanReference的坑 |
+| [03-Spring核心-AOP原理.md](./03-Spring全家桶/03-Spring核心-AOP原理.md) | AOP术语(JoinPoint/Pointcut/Advice/Aspect/Weaving)、5种通知与执行顺序(Spring 5.2.7前后@After位置差异)、JDK动态代理vs CGLIB(FastClass机制)、选择策略(Spring Boot 2.0+默认CGLIB)、AnnotationAwareAspectJAutoProxyCreator实现原理、拦截器链责任链、代理失效场景(this内部调用/static/final/private)、AopContext.currentProxy()解法、Spring AOP vs AspectJ |
+| [04-Spring核心-事务管理.md](./03-Spring全家桶/04-Spring核心-事务管理.md) | 声明式事务原理(@Transactional+TransactionInterceptor+AOP)、三大接口(PlatformTransactionManager/TransactionDefinition/TransactionStatus)、7种传播行为(REQUIRED/REQUIRES_NEW/NESTED重点)、隔离级别、默认回滚规则(RuntimeException+Error回滚checked不回滚)、5大失效场景(非public/自调用/异常吞/rollbackFor不匹配/MyISAM)、多线程事务失效 |
+| [05-SpringBoot自动配置与启动原理.md](./03-Spring全家桶/05-SpringBoot自动配置与启动原理.md) | 约定优于配置、@SpringBootApplication拆解、自动配置全链路(@EnableAutoConfiguration->AutoConfigurationImportSelector)、spring.factories->AutoConfiguration.imports版本演变(2.7引入/3.0移除自动配置/其他扩展点仍用factories)、条件注解、SpringApplication.run启动流程、应用类型推断、refresh()关键步骤、内嵌Tomcat在onRefresh启动、Runner执行时机 |
+| [06-SpringBoot-Starter与配置体系.md](./03-Spring全家桶/06-SpringBoot-Starter与配置体系.md) | Starter机制与组成、官方(spring-boot-starter-xxx)vs第三方(xxx-spring-boot-starter)命名规范、自定义Starter完整步骤、配置文件properties vs YAML、配置加载优先级(命令行>系统属性>环境变量>外部>内部)、Profile多环境、@Value vs @ConfigurationProperties(松散绑定/JSR303校验)、@PropertySource不支持YAML、@RefreshScope热刷新 |
+| [07-SpringCloud-注册发现与服务调用.md](./03-Spring全家桶/07-SpringCloud-注册发现与服务调用.md) | SpringCloud定位与版本命名(地铁站名->2020.0日历版)、Netflix停更现状(Eureka1.x维护/Hystrix停更/Ribbon停更LoadBalancer替代/Zuul->Gateway)、Eureka(AP/peer复制/自我保护85%阈值)、Nacos(临时AP-Distro/永久CP-Raft/默认AP/推送vs拉取)、OpenFeign原理(FactoryBean->JDK代理->SynchronousMethodHandler)、OpenFeign vs Dubbo、客户端vs服务端负载均衡 |
+| [08-SpringCloud-网关与熔断降级.md](./03-Spring全家桶/08-SpringCloud-网关与熔断降级.md) | API网关职责、Zuul1.x同步阻塞/Zuul2.x异步未进SpringCloud/Gateway基于WebFlux+Netty异步非阻塞、Gateway核心概念(Route/Predicate/Filter)与工作原理、熔断器三状态(CLOSED/OPEN/HALF_OPEN)、雪崩效应、4种限流算法(令牌桶支持突发vs漏桶匀速)、Hystrix/Resilience4j/Sentinel对比(Sentinel核心是流量控制+系统自适应限流)、Nacos长轮询配置热刷新、Seata四种模式与三角色、Sleuth被移除->Micrometer Tracing |
 
 ---
 

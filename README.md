@@ -100,6 +100,7 @@
 | [02-Kafka基础.md](./06-中间件/02-Kafka基础.md) | 集群部署与启动（Broker/Controller选举）、创建主题（Topic/Partition/Replica/Leader-Follower/Log）、生产消息（三组件/发送方式/分区/ACK/幂等与事务/传输语义）、存储消息（文件格式/稀疏索引/HW-LEO-ISR/数据一致性）、消费消息（消费者组/Coordinator/分配策略/Offset管理） |
 | [03-Kafka进阶.md](./06-中间件/03-Kafka进阶.md) | Controller选举与防脑裂(epoch)、Broker上下线与Leader重选举、数据偏移量定位(Segment/稀疏索引/跳跃表)、Topic删除、日志清理与压缩(delete/compact/墓碑)、页缓存、零拷贝(sendfile/mmap)、顺序写日志、KRaft模式 |
 | [04-Nginx.md](./06-中间件/04-Nginx.md) | Nginx四大能力(HTTP服务器/反向代理/负载均衡/动静分离)、正向vs反向代理、高性能原理(epoll/master-worker)、worker进程控制(worker_processes/worker_connections/最大并发计算/CPU亲和性)、负载均衡策略(轮询/权重/ip_hash/url_hash)与配置示例(upstream/proxy_pass/server附加参数)、核心配置、与Tomcat配合 |
+| [05-MyBatis.md](./06-中间件/05-MyBatis.md) | MyBatis定位(半自动ORM)与JDBC/Hibernate对比、核心组件架构(SqlSessionFactory/SqlSession/Executor/四大Handler)与查询执行时序、Mapper接口绑定原理(JDK动态代理/MapperProxy/namespace+id)、#{}预编译防注入vs${}拼接、动态SQL标签(if/choose/where/set/foreach)、一级缓存(SqlSession级/Spring下几乎失效/@Transactional内短暂生效)与二级缓存(namespace级/需Serializable/多表脏读/分布式建议关闭下沉Redis)、插件原理(JDK动态代理责任链拦截四大对象)、PageHelper分页(ThreadLocal/物理vs逻辑分页)、Spring集成(@MapperScan/MapperFactoryBean/SqlSessionTemplate)、N+1问题、资料勘误 |
 
 ---
 

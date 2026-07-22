@@ -64,9 +64,10 @@
 
 | 文件 | 核心内容 |
 |------|---------|
-| [05-Elasticsearch基础与架构.md](./04-数据库/05-Elasticsearch基础与架构.md) | ES定位(搜索引擎+文档NoSQL)、概念模型(Index/Doc/Mapping/Shard/Replica对照MySQL)、节点角色(Master/Data/Coordinating/Ingest)、主分片与副本、路由公式(hash(routing)%主分片数)、分片数选择、集群健康状态、选主与脑裂(7.0+自动规避)、ES vs MySQL对比、MySQL同步ES(Canal/binlog) |
+| [05-Elasticsearch基础与架构.md](./04-数据库/05-Elasticsearch基础与架构.md) | ES定位(搜索引擎+文档NoSQL)、概念模型(Index/Doc/Mapping/Shard/Replica对照MySQL)、节点角色(Master/Data/Coordinating/Ingest/7.10+数据层data_hot/warm/cold/frozen/content)、冷热分层架构、专用Master、主分片与副本、路由公式(hash(routing)%主分片数)、集群健康状态、选主与脑裂(zen2 term机制/7.0+自动规避/假死场景)、Cluster State与两阶段发布、Discovery选主、分片分配(Allocation Deciders/Awareness/Filter/Balancer)、Recovery机制(阶段/限流/滚动重启)、线程池模型、内存模型(Heap组成/Page Cache/Circuit Breaker)、生产部署与容量规划、监控指标体系、安全机制(RBAC/TLS/审计)、ES vs MySQL、MySQL同步ES(Canal/binlog) |
 | [06-Elasticsearch索引与读写原理.md](./04-数据库/06-Elasticsearch索引与读写原理.md) | 倒排索引(Term Dictionary/Term Index FST/Posting List压缩FOR+RoaringBitmap)、Doc Values列式正排、分词器Analyzer三段式(char filter/tokenizer/token filter)与ik中文分词、写入分词vs搜索分词、Mapping(text vs keyword/动态vs显式/字段类型不可改)、写入流程(refresh/flush/translog/NRT/segment不可变+merge+标记删除)、读取流程(query then fetch两阶段)、相关性打分(TF-IDF->BM25) |
 | [07-Elasticsearch查询与调优.md](./04-数据库/07-Elasticsearch查询与调优.md) | Query DSL(query vs filter缓存)、bool四子句(must/filter/should/must_not)、term查text搜不到坑、聚合(Bucket/Metric/Pipeline)、深分页(from+size/scroll/search_after/PIT)、索引/查询/写入/JVM调优、集群运维(健康状态/未分配原因/Recovery/ILM脑裂)、写放大回顾(5~10x/与BanyanDB对比)、ES vs ClickHouse vs MySQL选型、资料勘误(type已弃用等) |
+| [08-Elasticsearch运维与故障排查.md](./04-数据库/08-Elasticsearch运维与故障排查.md) | 排查方法论与工具箱、集群Red/Yellow排查(allocation/explain未分配原因)、节点OOM/假死、磁盘水位线三水位(flood只读锁需手动解除)、GC停顿(Long GC/heap dump)、Thread Pool rejected(write/search/get)、写入慢/拒绝(bulk/refresh/merge)、慢查询(慢日志/profile API)、Heap占用高(各cache/jmap+MAT)、Circuit Breaker触发、Recovery慢、Mapping爆炸/Cluster State膨胀、热点分片/数据倾斜(hot_threads)、网络分区/Master假死、滚动升级与节点维护(voting_config_exclusions/drain)、快照备份恢复(snapshot/restore)、ILM故障、运维向面试题、资料勘误(只读锁不自动解除/reject勿调大队列/breaker勿调大阈值等) |
 
 ---
 

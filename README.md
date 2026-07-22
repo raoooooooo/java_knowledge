@@ -218,6 +218,69 @@
 
 ---
 
+### 15 - Agent开发面试实战
+
+> Java 工程师视角的 AI Agent 开发面试指南。与「13-AI与大模型」互补：13 章讲原理，本系列讲 Java 实战(Spring AI / LangChain4j) + 高频面试题 + 生产踩坑。从入门到精通，6 篇 28 章。
+
+| 文件 | 核心内容 |
+|------|---------|
+| [00-总览与学习路径.md](./14-Agent开发面试实战/00-总览与学习路径.md) | 系列定位(Java视角/面试导向/与13章互补)、28章大纲、6-8周学习路径、面试能力地图(必考/高频/中频考点分层)、Java Agent技术栈全景、名词约定 |
+| [01-Agent开发全景与面试能力地图.md](./14-Agent开发面试实战/01-Agent开发全景与面试能力地图.md) | 岗位现状(Java面试AI占比)、Java工程师为何学Agent(AI工程化优势)、与传统后端差异(确定性vs非确定性)、面试能力地图、高频面试题 |
+| [02-大模型API调用与参数调优.md](./14-Agent开发面试实战/02-大模型API调用与参数调优.md) | 主流模型API对比(OpenAI/Anthropic/Qwen/DeepSeek/GLM)、核心参数(temperature/top_p/max_tokens/seed)、流式SSE与Java处理、Token计费、多模态、Java客户端实战(Spring AI/OkHttp/WebFlux)、高频面试题 |
+| [03-提示工程实战与工程化.md](./14-Agent开发面试实战/03-提示工程实战与工程化.md) | Prompt结构化模板(角色/任务/格式/示例)、Few-shot/CoT、JSON/XML结构化输出、Prompt模板版本化管理、Prompt注入与防御、高频面试题 |
+| [04-结构化输出与函数调用.md](./14-Agent开发面试实战/04-结构化输出与函数调用.md) | JSON Schema与Structured Output、Function Calling/Tool Use流程、并行工具调用、与MCP关系、Spring AI @Tool与LangChain4j @Tool实战、高频面试题 |
+
+#### 第二篇 · RAG 检索增强（`14-Agent开发面试实战/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [05-RAG基础与离线建库.md](./14-Agent开发面试实战/05-RAG基础与离线建库.md) | RAG全流程、文档加载与切分(固定/语义/递归/父子块)、Embedding选型(BGE/通义/Cohere)、向量库选型(Milvus/Pgvector/ES/Qdrant)、Spring AI VectorStore与LangChain4j实战 |
+| [06-RAG检索与召回优化.md](./14-Agent开发面试实战/06-RAG检索与召回优化.md) | 稠密/稀疏/混合检索、Rerank重排(bge-reranker)、查询改写/HyDE/查询路由、元数据过滤、Top-K调优、上下文压缩(LLMLingua)、高频面试题 |
+| [07-RAG进阶架构.md](./14-Agent开发面试实战/07-RAG进阶架构.md) | Self-RAG/CRAG自适应纠错、RAPTOR递归摘要、GraphRAG/LightRAG图增强、Agentic RAG(Agent化RAG)、多跳检索与多源融合 |
+| [08-RAG评测与生产实战.md](./14-Agent开发面试实战/08-RAG评测与生产实战.md) | RAGAS四维指标、Bad case分析方法论、知识库更新策略(增量/全量)、生产RAG踩坑(切分丢语义/召不回/超限/引用溯源)、高频面试题 |
+
+#### 第三篇 · Agent 核心（`14-Agent开发面试实战/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [09-Agent运行循环与ReAct范式.md](./14-Agent开发面试实战/09-Agent运行循环与ReAct范式.md) | Agent Loop工程实现(伪代码+Java)、ReAct/Plan-Execute/Reflexion代码级对比、循环终止与防死循环(最大步数/超时/重复检测)、错误处理重试、手写最简Agent Loop |
+| [10-上下文工程实战.md](./14-Agent开发面试实战/10-上下文工程实战.md) | 上下文窗口管理、Auto-Compact自动压缩、关键信息锚定、子Agent上下文隔离、长上下文工程(Lost in the Middle/1M窗口)、高频面试题 |
+| [11-记忆系统设计.md](./14-Agent开发面试实战/11-记忆系统设计.md) | 短期/长期/工作/情景/语义/程序记忆、向量记忆库设计与检索、记忆写入策略、记忆遗忘与反思、Spring AI会话记忆实战、高频面试题 |
+| [12-工具调用工程化.md](./14-Agent开发面试实战/12-工具调用工程化.md) | 工具设计原则(描述清晰/参数简单/错误可读)、工具治理(数量/分组/按需加载)、错误处理与自我修正、动态工具发现与MCP集成、Spring AI/LangChain4j @Tool实战 |
+| [13-自我反思与评估体系.md](./14-Agent开发面试实战/13-自我反思与评估体系.md) | Self-Correction/Critic-Actor、Verifier/Guardrail客观校验、LLM-as-Judge、评测数据集与回归测试、Java侧评测工程实践 |
+
+#### 第四篇 · 框架与编排（`14-Agent开发面试实战/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [14-LangChain4j详解.md](./14-Agent开发面试实战/14-LangChain4j详解.md) | LangChain4j定位与核心组件、与Python LangChain对比、AiServices/Tools/Memory/RAG模块、Spring Boot集成实战、选型对比 |
+| [15-SpringAI详解.md](./14-Agent开发面试实战/15-SpringAI详解.md) | Spring AI核心抽象(ChatClient/Advisor/Embedding/VectorStore/ToolCallback)、Advisor链机制(类似拦截器)、Tool Calling、RAG与VectorStore、Spring Boot生产配置、与LangChain4j选型 |
+| [16-SpringAIAlibaba与国内生态.md](./14-Agent开发面试实战/16-SpringAIAlibaba与国内生态.md) | Spring AI Alibaba定位、通义千问/百炼/DashScope接入、Graph/RAG/Observability扩展、国内合规与私有化部署 |
+| [17-复杂流程编排.md](./14-Agent开发面试实战/17-复杂流程编排.md) | LangGraph状态图思想(State/Node/Edge/条件路由/循环)、人在环/断点恢复/回放、Java流程编排方案(Spring AI Alibaba Graph/自研状态机)、并发分支编排 |
+| [18-多Agent系统实战.md](./14-Agent开发面试实战/18-多Agent系统实战.md) | 四种多Agent架构工程实现、Agent间通信与协调、成本控制与可观测、Java多Agent框架对比 |
+
+#### 第五篇 · 工程化与生产（`14-Agent开发面试实战/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [19-Agent工程化架构.md](./14-Agent开发面试实战/19-Agent工程化架构.md) | 无状态运行时+有状态存储、会话持久化与断点恢复、Agent as a Service/API网关、异步长任务与队列、高可用与水平扩展 |
+| [20-可观测性实战.md](./14-Agent开发面试实战/20-可观测性实战.md) | LLM可观测与传统APM差异、Trace/Token成本/延迟/错误率/质量、Langfuse/LangSmith/OTel GenAI接入、Spring AI Observation埋点 |
+| [21-安全与护栏.md](./14-Agent开发面试实战/21-安全与护栏.md) | Prompt注入防护(指令数据隔离/输入审核)、内容审核(输入/输出/工具调用)、PII脱敏与数据不出域、权限RBAC与最小权限、沙箱与外发管控 |
+| [22-模型路由与降级.md](./14-Agent开发面试实战/22-模型路由与降级.md) | 多模型策略(按任务/级联/降级)、成本优化(缓存/Prompt压缩/批处理)、私有化部署与混合云、模型版本管理与灰度 |
+| [23-Agent评测与灰度发布.md](./14-Agent开发面试实战/23-Agent评测与灰度发布.md) | 评测体系(离线/在线/LLM-as-Judge)、黄金数据集与回归、在线A/B与灰度、注册中心与版本管理回滚 |
+| [24-性能与成本优化.md](./14-Agent开发面试实战/24-性能与成本优化.md) | Token经济学与成本模型、Prompt压缩与上下文裁剪、批处理API/缓存/语义缓存、流式与并发、推理加速(vLLM/量化/蒸馏) |
+
+#### 第六篇 · 场景与面试冲刺（`14-Agent开发面试实战/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [25-经典场景实战.md](./14-Agent开发面试实战/25-经典场景实战.md) | 智能客服/企业知识库/代码助手/数据分析Agent(NL2SQL)/工作流自动化、系统设计题(设计企业知识库问答系统/智能客服) |
+| [26-AI编码助手与开发提效.md](./14-Agent开发面试实战/26-AI编码助手与开发提效.md) | Cursor/Claude Code/Copilot原理与对比、用AI提效(写代码/Review/测试/文档)、MCP Server开发实战、自建团队AI工具链 |
+| [27-高频面试题精讲上.md](./14-Agent开发面试实战/27-高频面试题精讲上.md) | LLM基础类(幻觉/训练/参数/上下文)、RAG类(流程/优化/评测/进阶)、Prompt类(设计/注入/工程化)、Function Calling/Tool类，题库+答案+话术 |
+| [28-高频面试题精讲下.md](./14-Agent开发面试实战/28-高频面试题精讲下.md) | Agent类(Loop/记忆/反思/多Agent)、MCP/协议类、工程化类(架构/可观测/安全/评测)、系统设计题套路、面试复盘与学习路线 |
+
+---
+
 ## 使用说明
 
 - 每个文件先列出核心概念和常见面试题的**大纲**

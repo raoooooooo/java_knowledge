@@ -12,9 +12,9 @@
 |--------------|-----------|
 | 单轮跑通 | 高可用、并发、状态持久化、会话恢复 |
 | 没监控 | 全链路 Trace、Token 成本、延迟、错误率 |
-| 手工评测 | 自动化评测集 + LLM-as-Judge + 在线 A/B |
+| 手工评测 | 自动化评测集 + LLM-as-Judge（用 LLM 当裁判打分） + 在线 A/B |
 | 硬编码模型 | 多模型路由、降级、成本优化 |
-| 无安全 | 内容审核、Prompt 注入防护、权限、PII 脱敏 |
+| 无安全 | 内容审核、Prompt 注入防护、权限、PII（Personally Identifiable Information，个人身份信息）脱敏 |
 | 无版本 | Agent 注册中心、版本管理、灰度发布 |
 
 ---
@@ -44,7 +44,7 @@
 
 ## 三、监控与日志（LLM 可观测）
 
-> LLM 应用非确定性，传统 APM 不够，需专门的 LLM 可观测。
+> LLM 应用非确定性，传统 APM（Application Performance Monitoring，应用性能监控）不够，需专门的 LLM 可观测。
 
 ### 3.1 要观测什么
 
@@ -52,7 +52,7 @@
 |------|------|------|
 | **Trace 追踪** | 一次调用展开成树（LLM/工具/检索每步输入输出） | 定位是哪步出问题 |
 | **Token 成本** | 每次/每天 token 消耗与费用 | 成本控制 |
-| **延迟** | TTFT（首 token 时间）、总时延 | 用户体验 |
+| **延迟** | TTFT（Time To First Token，首 token 时间）、总时延 | 用户体验 |
 | **错误率** | 工具失败、超时、被审核拦截 | 稳定性 |
 | **质量** | 幻觉率、回答相关度 | 效果 |
 | **业务** | 任务完成率、人工接管率 | 真实价值 |
@@ -65,7 +65,7 @@
 | **Langfuse** | 开源 LLM 可观测，可私有化，主流选择 |
 | **Arize Phoenix** | 开源，Trace+Eval，LLM 专用 |
 | **Helicone** | 代理层 Trace + 成本 + 缓存 |
-| **OpenTelemetry GenAI 语义约定** | 标准化 OTel 对 LLM 的埋点规范（跨厂商） |
+| **OpenTelemetry GenAI 语义约定** | 标准化 OTel（OpenTelemetry）对 LLM 的埋点规范（跨厂商） |
 
 > 与「10-监控与可观测性」章节呼应：传统 APM（Prometheus/SkyWalking）管服务指标和链路，LLM 可观测管「调用内容、token、prompt 质量」。二者常共存。
 
@@ -91,7 +91,7 @@
 | **在线 A/B** | 灰度对比真实指标 | 最终真相 |
 
 ### 4.2 RAG/Agent 专项指标
-- **RAG**：RAGAS 四指标（Faithfulness/Answer Relevancy/Context Precision/Recall，见「02」）。
+- **RAG**：RAGAS（RAG 评测框架）四指标（Faithfulness/Answer Relevancy/Context Precision/Recall，见「02」）。
 - **Agent**：任务完成率、工具调用准确率、平均步数、Token 消耗、人工接管率。
 - **代码 Agent**：测试通过率、编译通过率（可客观验证，最靠谱）。
 
@@ -110,7 +110,7 @@
 
 ### 5.2 Agent 网关（类比 API 网关）
 统一入口承担：
-- **鉴权**：API Key / OAuth / JWT。
+- **鉴权**：API Key / OAuth（开放授权）/ JWT（JSON Web Token，JSON 令牌）。
 - **限流熔断**：按租户/用户限流，防滥用和成本失控。
 - **路由**：按任务路由到不同 Agent。
 - **审计**：记录谁调了什么、输入输出（脱敏）。
@@ -169,7 +169,7 @@
 - **实现**：规则 + 小分类模型 + LLM 审核模型，多层防护。
 
 ### 8.2 权限管理
-- **RBAC / ABAC**：谁能用哪个 Agent、调哪个工具、访问哪些数据，按角色/属性控制。
+- **RBAC（Role-Based Access Control，基于角色的访问控制） / ABAC（Attribute-Based Access Control，基于属性的访问控制）**：谁能用哪个 Agent、调哪个工具、访问哪些数据，按角色/属性控制。
 - **最小权限**：Agent 只拿到完成任务所需的最小工具和数据权限。
 - **人在环（Human-in-the-Loop）**：高危操作（删除、外发、付款）必须人工确认。
 - **操作审计**：所有工具调用留痕可追溯。
@@ -197,7 +197,7 @@
 
 ```
 [用户/前端]
-    │ (AG-UI 事件流)
+    │ (AG-UI（Agent-User Interaction Protocol）事件流)
     ▼
 [Agent 网关] -- 鉴权/限流/审计/多模型适配
     │

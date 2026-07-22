@@ -137,7 +137,7 @@
 - **Task（任务）**：协作的基本单位，有生命周期（submitted/working/input-required/completed/failed/canceled 等）。
 - **Message / Part**：任务内多轮消息，每条消息含若干 Part（文本/文件/数据等结构化片段）。
 - **Artifact（产物）**：任务最终产出（如生成的文件、图片、结构化数据）。
-- **传输**：基于 **HTTP + JSON-RPC 2.0**，流式场景用 **SSE** 推送任务进度。
+- **传输**：基于 **HTTP + JSON-RPC 2.0**（JSON-RPC，基于 JSON 的远程过程调用协议），流式场景用 **SSE** 推送任务进度。
 
 ### 3.4 A2A vs MCP（高频面试题）★
 
@@ -180,7 +180,7 @@
 ### 5.2 解决什么痛点
 
 - 每个 Agent 框架向前端推流的方式都不同，前端要为每个框架写适配。
-- AG-UI 定义一组**标准事件**（如 `text-message-chunk` 文本块、`tool-call` 工具调用、`state-snapshot` 状态快照、`human-input-request` 请求人工输入等），通过事件流（SSE/WS）推给前端，前端用通用组件渲染。
+- AG-UI 定义一组**标准事件**（如 `text-message-chunk` 文本块、`tool-call` 工具调用、`state-snapshot` 状态快照、`human-input-request` 请求人工输入等），通过事件流（SSE/WS（WebSocket））推给前端，前端用通用组件渲染。
 
 ### 5.3 协议三角（这是面试的金句图）
 
@@ -214,7 +214,7 @@
 | **A2A** | Google | Agent<->Agent | HTTP+JSON-RPC (+SSE) | Agent Card/Task/Artifact | 快速增长 |
 | **ACP** | ACP 组织 | Agent<->Agent | HTTP/REST + 异步消息中间件 | AsyncAPI/消息 | 企业异步方向 |
 | **AG-UI** | CopilotKit | Agent<->前端 | 事件流(SSE/WS) | 标准事件 | 前端交互方向 |
-| **SSE** | W3C 标准 | 底层传输 | HTTP text/event-stream | 事件流 | 通用基础（MCP/A2A/AG-UI 多基于它） |
+| **SSE** | W3C（World Wide Web Consortium，万维网联盟）标准 | 底层传输 | HTTP text/event-stream | 事件流 | 通用基础（MCP/A2A/AG-UI 多基于它） |
 
 ---
 

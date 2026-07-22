@@ -12,7 +12,7 @@ LangChain Inc.（现 LangChain 公司）围绕 LLM 应用形成一套「全家�
 |------|------|------|
 | **LangChain** | 通用 LLM 应用开发框架 | 开发 |
 | **LangGraph** | 基于图的有状态 Agent 编排 | 开发（生产级 Agent） |
-| **LangSmith** | 观测/追踪/评测/Prompt 管理 | 运维（DevOps） |
+| **LangSmith** | 观测/追踪/评测/Prompt 管理 | 运维（DevOps，开发运维一体化） |
 | **LangServe / LangGraph Platform** | 把应用部署为 API / 托管运行时 | 部署 |
 
 > 用户列表中的 `LANGSUIT` 最可能指 **LangSmith**（也可能含 LangServe）。本章一并覆盖，请确认。
@@ -22,7 +22,7 @@ LangChain Inc.（现 LangChain 公司）围绕 LLM 应用形成一套「全家�
 - **定位**：最早最全的 LLM 应用框架，把「LLM + 提示 + 记忆 + 工具 + 检索 + 链」抽象成可组合组件。
 - **核心概念**：
   - **Chain（链）**：把多个步骤串起来（如 `prompt | llm | output_parser`）。
-  - **LCEL（LangChain Expression Language）**：用管道符 `|` 声明式编排，支持流式、批处理、异步、回溯（trace）。
+  - **LCEL（LangChain Expression Language，LangChain 表达式语言）**：用管道符 `|` 声明式编排，支持流式、批处理、异步、回溯（trace）。
   - **Agent / AgentExecutor**：早期用 `AgentExecutor` 跑 ReAct 循环。⚠️ 官方已**不推荐 AgentExecutor**，转而用 LangGraph 构建可控 Agent。
   - **Memory**：对话记忆抽象（已弱化，记忆迁移到 LangGraph State）。
   - **Retriever**：RAG 检索抽象。
@@ -54,7 +54,7 @@ app = graph.compile(checkpointer=MemorySaver())  # 支持中断恢复
 - **定位**：LLM 应用的**可观测 + 评测 + Prompt 管理**平台，类比 LLM 时代的 SkyWalking + JUnit。
 - **能力**：
   - **Trace 追踪**：把一次 Agent 调用展开成树（LLM 调用、工具调用、检索），每步的输入/输出/耗时/token 成本全记录。
-  - **Eval 评测**：定义数据集，自动跑评测，支持 LLM-as-a-Judge 自动打分，对比不同 Prompt/模型版本。
+  - **Eval 评测**：定义数据集，自动跑评测，支持 LLM-as-a-Judge（用 LLM 当裁判打分）自动打分，对比不同 Prompt/模型版本。
   - **Prompt Hub/管理**：版本化管理 Prompt，A/B 实验。
   - **Playground**：在线调试 Prompt/链。
 - **意义**：LLM 应用「非确定性」，传统监控不够，必须靠全链路 Trace + 回放评测才能稳定迭代。LangSmith 是 LangChain 生态的商业化核心。

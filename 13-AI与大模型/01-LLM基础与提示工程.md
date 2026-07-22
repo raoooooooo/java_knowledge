@@ -1,6 +1,6 @@
 # LLM 基础与提示工程
 
-> 本章是 AI 专题的「地基」。理解大模型本身的能力边界与提示词范式，才能理解后面 Agent、RAG、MCP 为什么是这样设计的。
+> 本章是 AI 专题的「地基」。理解大模型本身的能力边界与提示词范式，才能理解后面 Agent、RAG（Retrieval-Augmented Generation，检索增强生成）、MCP（Model Context Protocol，模型上下文协议）为什么是这样设计的。
 
 ---
 
@@ -22,9 +22,9 @@
 | **SFT 监督微调** | 学会按指令回答 | 人工标注的「指令-回答」对 | 指令跟随 | 对话模型（会聊天） |
 | **对齐 Alignment（RLHF/DPO）** | 对齐人类偏好（有用/无害/诚实） | 偏好数据（好回答 vs 坏回答） | 偏好优化 | 安全、礼貌、稳定的模型 |
 
-- **RLHF**（Reinforcement Learning from Human Feedback）：训练一个奖励模型给回答打分，再用 PPO 强化学习优化。
+- **RLHF**（Reinforcement Learning from Human Feedback）：训练一个奖励模型给回答打分，再用 PPO（Proximal Policy Optimization，近端策略优化）强化学习优化。
 - **DPO**（Direct Preference Optimization）：跳过奖励模型和 PPO，直接用偏好数据优化策略。更简单稳定，是目前主流（Llama3、Qwen、DeepSeek 等广泛采用）。
-- **RLAIF**：用另一个 LLM 替代人类打分（如 Constitutional AI）。
+- **RLAIF**（Reinforcement Learning from AI Feedback，基于 AI 反馈的强化学习）：用另一个 LLM 替代人类打分（如 Constitutional AI，宪法 AI）。
 
 ### 1.3 关键术语
 
@@ -138,7 +138,7 @@
    模型自行判断「已有足够信息」并输出 Final Answer；或框架设置最大步数兜底防止死循环。
 
 5. **温度=0 模型就完全确定了吗？**
-   不一定。受实现影响（如批处理浮点非确定性、KV-cache 等），同一输入不同次仍可能有微小差异，但通常可近似视为确定。
+   不一定。受实现影响（如批处理浮点非确定性、KV-cache（Key-Value cache，键值缓存）等），同一输入不同次仍可能有微小差异，但通常可近似视为确定。
 
 6. **上下文窗口 1M 就够用了，为什么还要 RAG？**
    窗口大 ≠ 能用好。长上下文存在 Lost in the Middle、成本高、速度慢、注意力稀释等问题；RAG 只检索相关片段，更准更省更快，且知识可随时更新。

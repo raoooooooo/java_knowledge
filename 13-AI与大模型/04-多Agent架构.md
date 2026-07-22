@@ -18,7 +18,7 @@
 ### 1.2 多 Agent 系统三要素
 
 1. **架构（Topology）**：Agent 之间怎么组织（层级/网络/竞争...）。
-2. **通信（Communication）**：Agent 之间怎么传消息（直接调用/共享黑板/消息总线/协议 A2A/ACP）。
+2. **通信（Communication）**：Agent 之间怎么传消息（直接调用/共享黑板/消息总线/标准协议 A2A（Agent2Agent）/ACP（Agent Communication Protocol））。
 3. **协调（Coordination）**：谁指挥、谁先动、怎么聚合（监督者/规则/投票）。
 
 ---
@@ -118,14 +118,14 @@
 | **标准协议** | 跨进程/跨厂商的 Agent 间通信协议 | **A2A、ACP**（见第6章） |
 
 - **共享 State** 是 LangGraph 的核心抽象：图节点（Agent）读写同一个 State 对象，靠 State 传递信息，天然支持检查点/回放/人在环。
-- **A2A/ACP 协议** 解决的是「不同框架/不同厂商的 Agent 怎么互通」--类比微服务的 RPC 标准。
+- **A2A/ACP 协议** 解决的是「不同框架/不同厂商的 Agent 怎么互通」--类比微服务的 RPC（Remote Procedure Call，远程过程调用）标准。
 
 ---
 
 ## 四、典型案例
 
 ### 4.1 MetaGPT（软件公司模拟）
-模拟一个软件公司：Product Manager -> Architect -> Engineer -> QA，各司其职，按 SOP 协作产出软件。**层级+流水线**架构的代表。
+模拟一个软件公司：Product Manager -> Architect -> Engineer -> QA，各司其职，按 SOP（Standard Operating Procedure，标准作业流程）协作产出软件。**层级+流水线**架构的代表。
 
 ### 4.2 AutoGen（微软）
 对话式多 Agent 框架。核心是 `GroupChat`：多个 Agent 在一个群聊里按规则轮流发言，由一个 `GroupChatManager` 决定下一个发言者。**网络/协作**架构代表。
@@ -147,7 +147,7 @@ LangGraph 官方总结三种多 Agent 模式：**Supervisor（监督者）/ Hier
 - **上下文隔离 vs 信息共享**：隔离防污染但可能丢全局信息；共享全但易爆炸。折中：共享精简 State，子 Agent 内部细节隔离。
 - **防死循环**：网络架构必须设最大轮数/收敛条件，否则 Agent 可能无限对话。
 - **可观测**：多 Agent 调用链路深，必须有 Trace（见第8章），否则出 bug 无法定位是哪个 Agent 的问题。
-- **成本控制**：辩论/网络架构 token 消耗是单 Agent 的数倍，需评估 ROI。
+- **成本控制**：辩论/网络架构 token 消耗是单 Agent 的数倍，需评估 ROI（Return on Investment，投资回报率）。
 
 ---
 

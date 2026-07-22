@@ -75,7 +75,7 @@ Advanced RAG 的常见优化点：
 
 **核心索引算法**（决定检索速度与精度）：
 - **HNSW**（Hierarchical Navigable Small World）：基于图，查询快、精度高、内存大，是当前主流。
-- **IVF**（Inverted File）：基于倒排聚簇，可结合 PQ 乘积量化压缩内存，适合超大规模。
+- **IVF**（Inverted File）：基于倒排聚簇，可结合 PQ（Product Quantization，乘积量化）压缩内存，适合超大规模。
 - **Flat**：暴力精确检索，只适合小数据。
 
 > 面试常问「HNSW 和 IVF 怎么选」：要精度和速度选 HNSW（吃内存）；要大规模+省内存选 IVF+PQ。
@@ -83,8 +83,8 @@ Advanced RAG 的常见优化点：
 ### 2.4 检索方式
 
 - **稠密检索（Dense）**：Embedding 向量相似度，擅长语义匹配。
-- **稀疏检索（Sparse）**：BM25 等关键词检索，擅长精确词匹配（人名/型号/代码标识符）。
-- **混合检索（Hybrid）**：Dense + Sparse 融合（如 RRF Reciprocal Rank Fusion），取长补短——这是生产推荐做法。
+- **稀疏检索（Sparse）**：BM25（Best Matching 25，最佳匹配）等关键词检索，擅长精确词匹配（人名/型号/代码标识符）。
+- **混合检索（Hybrid）**：Dense + Sparse 融合（如 RRF（Reciprocal Rank Fusion，倒数排名融合）），取长补短——这是生产推荐做法。
 
 ### 2.5 Rerank 重排
 

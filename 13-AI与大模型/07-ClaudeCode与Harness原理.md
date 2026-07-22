@@ -1,6 +1,6 @@
 # Claude Code 与 Harness 原理
 
-> 本章用一个真实的生产级 Agent--**Claude Code**（Anthropic 官方 CLI Agent）--把前面所有概念串起来：Agent Loop、上下文工程、工具系统、Skill、子 Agent、Hooks、权限沙箱，以及背后的 **Harness** 运行时。看懂这个真实案例，Agent 原理就落地了。
+> 本章用一个真实的生产级 Agent--**Claude Code**（Anthropic 官方 CLI（Command-Line Interface，命令行界面）Agent）--把前面所有概念串起来：Agent Loop、上下文工程、工具系统、Skill、子 Agent、Hooks、权限沙箱，以及背后的 **Harness** 运行时。看懂这个真实案例，Agent 原理就落地了。
 
 ---
 
@@ -19,7 +19,7 @@
 - **职责清单**：
   1. 运行 Agent Loop（接收输入->组装上下文->调模型->分发工具->回灌结果）。
   2. 上下文工程（窗口管理、自动压缩、关键信息锚定）。
-  3. 工具系统（内置工具、MCP 扩展、工具调度）。
+  3. 工具系统（内置工具、MCP（Model Context Protocol，模型上下文协议）扩展、工具调度）。
   4. 权限与沙箱（确认、白名单、隔离执行）。
   5. 子 Agent / 并行编排（Task、Workflow）。
   6. 记忆与持久化（memory、todo、文件状态）。

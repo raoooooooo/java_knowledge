@@ -15,6 +15,7 @@
 | [03-IO与NIO.md](./01-java基础/03-IO与NIO.md) | BIO/NIO/AIO、字节流/字符流、序列化、Channel/Buffer/Selector、零拷贝、直接内存 |
 | [04-Java8+新特性.md](./01-java基础/04-Java8+新特性.md) | Lambda、函数式接口、Stream、Optional、默认方法、新日期API、CompletableFuture |
 | [05-其他核心知识点.md](./01-java基础/05-其他核心知识点.md) | 反射、动态代理、注解、泛型、异常、四大引用、双亲委派、SPI |
+| [06-Java高频面试题集.md](./01-java基础/06-Java高频面试题集.md) | Java基础(装箱缓存/值传递/反射/异常/String不可变)、集合(ArrayList扩容/HashMap底层1.7-1.8/ConcurrentHashMap分段锁演进/fail-fast)、并发(synchronized锁升级/volatile不保证原子性/AQS双向队列/CAS与ABA/线程池七参四策略/ThreadLocal内存泄漏/死锁四条件/JMM三大特性happens-before)、JVM(运行时数据区/堆分代/GC Roots三色标记/四大GC算法/CMS-G1-ZGC/类加载5阶段双亲委派及三次破坏/OOM排查/CPU飙高排查)、资料勘误(Integer缓存非常量池/String底层byte[]/HashMap树化双条件/AQS双向链表/元空间在本地内存等25+处) |
 
 ---
 
@@ -47,6 +48,7 @@
 | [06-SpringBoot-Starter与配置体系.md](./03-Spring全家桶/06-SpringBoot-Starter与配置体系.md) | Starter机制与组成、官方(spring-boot-starter-xxx)vs第三方(xxx-spring-boot-starter)命名规范、自定义Starter完整步骤、配置文件properties vs YAML、配置加载优先级(命令行>系统属性>环境变量>外部>内部)、Profile多环境、@Value vs @ConfigurationProperties(松散绑定/JSR303校验)、@PropertySource不支持YAML、@RefreshScope热刷新 |
 | [07-SpringCloud-注册发现与服务调用.md](./03-Spring全家桶/07-SpringCloud-注册发现与服务调用.md) | SpringCloud定位与版本命名(地铁站名->2020.0日历版)、Netflix停更现状(Eureka1.x维护/Hystrix停更/Ribbon停更LoadBalancer替代/Zuul->Gateway)、Eureka(AP/peer复制/自我保护85%阈值)、Nacos(临时AP-Distro/永久CP-Raft/默认AP/推送vs拉取)、OpenFeign原理(FactoryBean->JDK代理->SynchronousMethodHandler)、OpenFeign vs Dubbo、客户端vs服务端负载均衡 |
 | [08-SpringCloud-网关与熔断降级.md](./03-Spring全家桶/08-SpringCloud-网关与熔断降级.md) | API网关职责、Zuul1.x同步阻塞/Zuul2.x异步未进SpringCloud/Gateway基于WebFlux+Netty异步非阻塞、Gateway核心概念(Route/Predicate/Filter)与工作原理、熔断器三状态(CLOSED/OPEN/HALF_OPEN)、雪崩效应、4种限流算法(令牌桶支持突发vs漏桶匀速)、Hystrix/Resilience4j/Sentinel对比(Sentinel核心是流量控制+系统自适应限流)、Nacos长轮询配置热刷新、Seata四种模式与三角色、Sleuth被移除->Micrometer Tracing |
+| [09-Spring事务高频场景题.md](./03-Spring全家桶/09-Spring事务高频场景题.md) | 长事务核心场景(事务内调第三方接口超时->连接占用/锁不释放/连接池耗尽/超时回滚致数据不一致/timeout失效)、同类场景(事务内发MQ消息丢失/调RPC/循环调接口/CPU耗时/REQUIRES_NEW双连接/Redis缓存操作)、@Transactional timeout为何不生效、通用解决框架(缩小事务边界/编程式事务/异步化MQ/本地消息表)、事务内能否做X判断表、资料勘误(timeout是错觉/DB回滚无法撤销MQ/REQUIRES_NEW连接占用) |
 
 ---
 
@@ -278,6 +280,30 @@
 | [26-AI编码助手与开发提效.md](./14-Agent开发面试实战/26-AI编码助手与开发提效.md) | Cursor/Claude Code/Copilot原理与对比、用AI提效(写代码/Review/测试/文档)、MCP Server开发实战、自建团队AI工具链 |
 | [27-高频面试题精讲上.md](./14-Agent开发面试实战/27-高频面试题精讲上.md) | LLM基础类(幻觉/训练/参数/上下文)、RAG类(流程/优化/评测/进阶)、Prompt类(设计/注入/工程化)、Function Calling/Tool类，题库+答案+话术 |
 | [28-高频面试题精讲下.md](./14-Agent开发面试实战/28-高频面试题精讲下.md) | Agent类(Loop/记忆/反思/多Agent)、MCP/协议类、工程化类(架构/可观测/安全/评测)、系统设计题套路、面试复盘与学习路线 |
+
+---
+
+### 16 - 计算机基础
+
+> 计算机网络与操作系统基础，偏面试高频。与「01-java基础」「06-中间件」互补：NIO/epoll/零拷贝等知识点在各自技术栈里点到为止，底层机制在此统一讲透。
+
+| 文件 | 核心内容 |
+|------|---------|
+| [01-计算机网络.md](./16-计算机基础/01-计算机网络.md) | 网络分层模型(OSI七层vs TCP/IP四层/数据封装单位)、TCP vs UDP、三次握手(为什么不是两次/四次/SYN洪泛)、四次挥手(为什么四次/TIME_WAIT与2MSL/CLOSE_WAIT过多)、TCP可靠传输(序列号/超时重传/滑动窗口/流量控制rwnd/拥塞控制慢开始-拥塞避免-快重传-快恢复)、HTTP方法与状态码/Cookie-Session-Token、HTTP演进(1.0/1.1/2/3队头阻塞/多路复用/QUIC)、HTTPS混合加密与TLS握手/CA证书、输入URL到页面显示、TCP粘包/正反向代理/CDN/CORS跨域/DNS协议、资料勘误(三次握手根因/UDP快不绝对/HTTP2未根治队头阻塞等) |
+| [02-操作系统.md](./16-计算机基础/02-操作系统.md) | 进程vs线程vs协程(资源分配/调度单位/上下文切换开销/协程用户态切换)、IPC通信(管道/消息队列/共享内存最快/信号量/信号/Socket)、进程调度算法(FCFS/SJF/优先级/时间片轮转/多级反馈队列)、死锁四条件与处理(预防/银行家避免/检测解除)、虚拟内存与分页(TLB/多级页表/段页式)、页面置换算法(OPT/FIFO-Belady异常/LRU哈希表+双向链表/LFU/Clock)、线程同步(互斥锁vs自旋锁/读写锁/条件变量/信号量)、IO模型四概念区分与五大IO模型、IO多路复用select/poll/epoll(LT vs ET/epoll为什么快)、Reactor三种模式、用户态内核态与系统调用、零拷贝sendfile/mmap、文件系统inode/硬链接软链接/VFS、僵尸孤儿进程、资料勘误(阻塞非阻塞vs同步异步两维度/ET必须配非阻塞IO/协程阻塞坑等) |
+
+---
+
+### 17 - 场景题
+
+> 跨主题、面试导向的场景题问答，聚焦"给定业务场景会出现什么问题、怎么解决、怎么选型"。与各知识点章节（01-java基础/04-数据库/05-分布式/06-中间件）及「09-系统设计与架构/经典场景设计」互补：那里讲原理与单点技术，本系列讲场景化的问题分析与方案权衡。
+
+| 文件 | 核心内容 |
+|------|---------|
+| [01-高并发与并发场景.md](./17-场景题/01-高并发与并发场景.md) | 库存扣减防超卖(DB行锁FOR UPDATE/乐观锁版本号/Redis预扣减+Lua原子/分布式锁)、秒杀系统(削峰MQ/限流/缓存预热/异步下单/分段锁)、订单超时取消(定时扫表/DelayQueue/RocketMQ延迟/时间轮)、限流(计数器/滑动窗口/令牌桶/漏桶 单机Sentinel vs 分布式Redis+Lua)、线程池实战(参数设置/突发流量/隔离/优雅关闭/禁用Executors)、分布式计数与排行榜(ZSet)、接口幂等(token/唯一索引/状态机/防重表)、精度问题(BigDecimal/LongAdder)、热点key、SimpleDateFormat线程安全、资料勘误(Redis预扣减必须Lua/乐观锁CAS/Redis过期通知不可靠) |
+| [02-缓存与消息队列场景.md](./17-场景题/02-缓存与消息队列场景.md) | 缓存穿透(布隆过滤器/空值)、击穿(互斥锁/逻辑过期)、雪崩(随机过期/熔断降级/多级缓存)、DB-缓存一致性(先更新DB再删缓存/延迟双删/为什么删而非更新)、热key大key、双写强一致(Cache Aside/afterCommit)；MQ消息丢失(三端保障-生产确认/持久化/手动ACK)、重复消费(幂等)、顺序性(同key同队列)、堆积(扩消费者/临时Topic/批量)、延迟消息(RocketMQ延迟等级/死信)、可靠投递；资料勘误(推荐先更新DB再删缓存/延迟双删原理/布隆无漏判有误判/顺序仅同队列内/手动ACK配幂等/Kafka单partition天然有序vs RocketMQ锁queue) |
+| [03-分布式与数据库场景.md](./17-场景题/03-分布式与数据库场景.md) | 分布式锁实现与选型(Redis setnx+NX PX原子加锁+Lua释放校验value/Redlock争议/Zookeeper临时顺序节点CP/数据库唯一索引)、分布式锁三大坑(锁过期业务没完-Redisson看门狗30s租约10s续期仅未指定leaseTime生效/释放误删-UUID+Lua原子/主从切换丢锁)、分布式事务选型(2PC-XA强一致阻塞/Seata AT全局串行/TCC空回滚悬挂幂等/SAGA补偿/本地消息表/可靠消息最终一致/CAP与BASE)、分布式ID(UUID无序不做主键/雪花算法时钟回拨/号段模式Leaf/Redis incr)、分库分表(何时分-垂直水平-分片键-跨库Join聚合分页难题)、分库分表后全局唯一ID(雪花算法时钟回拨处理)、MySQL死锁排查(show engine innodb status/行锁交叉更新/间隙锁RR级别)、慢SQL优化(explain type-key-rows/索引失效/回表/覆盖索引/大分页游标WHERE id>last_id/延迟关联)、千万级大表优化(索引-冷热分离-归档-读写分离-分库分表/分批DELETE/count计数表)、高并发改同一行(乐观锁版本号vs悲观锁FOR UPDATE会阻塞vs分布式锁vs条件CAS WHERE stock>0)、主从延迟读旧数据(强制走主库/缓存过渡/半同步仍异步回放)、连接池配置(HikariCP公式core*2+spindle/maxLifetime小于wait_timeout/minimumIdle=maximumPoolSize)、资料勘误(setnx+expire非原子/看门狗leaseTime条件/Redlock争议/间隙锁RC消除/深分页游标/UUID主键页分裂/连接池非越大越好等) |
+| [04-系统设计实战.md](./17-场景题/04-系统设计实战.md) | 系统设计题六步法套路(STAR)、短链(302重定向/Base62/发号器)、Feed流(推/拉/推拉结合)、IM(读写扩散/消息有序/可靠投递/已读未读)、抢红包(二倍均值法)、排行榜(ZSet/分桶)、点赞(去重/计数/异步落库)、秒杀(分层防护)、电商订单(状态机/分布式事务/超时取消)、附近的人(Redis GEO/Geohash/Haversine)、资料勘误(301vs302/推模式适用场景/写扩散爆炸/二倍均值不均匀/ZSet分桶/Redis过期通知不可靠) |
 
 ---
 

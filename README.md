@@ -309,6 +309,14 @@
 | [03-分布式与数据库场景.md](./17-场景题/03-分布式与数据库场景.md) | 分布式锁实现与选型(Redis setnx+NX PX原子加锁+Lua释放校验value/Redlock争议/Zookeeper临时顺序节点CP/数据库唯一索引)、分布式锁三大坑(锁过期业务没完-Redisson看门狗30s租约10s续期仅未指定leaseTime生效/释放误删-UUID+Lua原子/主从切换丢锁)、分布式事务选型(2PC-XA强一致阻塞/Seata AT全局串行/TCC空回滚悬挂幂等/SAGA补偿/本地消息表/可靠消息最终一致/CAP与BASE)、分布式ID(UUID无序不做主键/雪花算法时钟回拨/号段模式Leaf/Redis incr)、分库分表(何时分-垂直水平-分片键-跨库Join聚合分页难题)、分库分表后全局唯一ID(雪花算法时钟回拨处理)、MySQL死锁排查(show engine innodb status/行锁交叉更新/间隙锁RR级别)、慢SQL优化(explain type-key-rows/索引失效/回表/覆盖索引/大分页游标WHERE id>last_id/延迟关联)、千万级大表优化(索引-冷热分离-归档-读写分离-分库分表/分批DELETE/count计数表)、高并发改同一行(乐观锁版本号vs悲观锁FOR UPDATE会阻塞vs分布式锁vs条件CAS WHERE stock>0)、主从延迟读旧数据(强制走主库/缓存过渡/半同步仍异步回放)、连接池配置(HikariCP公式core*2+spindle/maxLifetime小于wait_timeout/minimumIdle=maximumPoolSize)、资料勘误(setnx+expire非原子/看门狗leaseTime条件/Redlock争议/间隙锁RC消除/深分页游标/UUID主键页分裂/连接池非越大越好等) |
 | [04-系统设计实战.md](./17-场景题/04-系统设计实战.md) | 系统设计题六步法套路(STAR)、短链(302重定向/Base62/发号器)、Feed流(推/拉/推拉结合)、IM(读写扩散/消息有序/可靠投递/已读未读)、抢红包(二倍均值法)、排行榜(ZSet/分桶)、点赞(去重/计数/异步落库)、秒杀(分层防护)、电商订单(状态机/分布式事务/超时取消)、附近的人(Redis GEO/Geohash/Haversine)、资料勘误(301vs302/推模式适用场景/写扩散爆炸/二倍均值不均匀/ZSet分桶/Redis过期通知不可靠) |
 
+### 18 - 面试技巧与职业规划
+
+> HR 面、行为面试、谈薪、职业规划等软实力内容。技术决定你能不能过一面，软实力决定你能不能拿到 offer、拿什么样的 offer。
+
+| 文件 | 核心内容 |
+|------|---------|
+| [01-HR面试技巧.md](./18-面试技巧与职业规划/01-HR面试技巧.md) | HR 面考察 8 大维度、STAR 法则详解、9 道高频 HR 问题回答思路(自我介绍/最大挫折/离职原因/优缺点/职业规划/为什么选我们/冲突处理/谈薪)、谈薪技巧与话术、面试礼仪、送命题避坑指南 |
+
 ---
 
 ## 使用说明

@@ -46,6 +46,93 @@
 
 > ⚠️ **为什么 AI Agent 爱用 SSE**：LLM 流式生成天然是「服务器持续推 token」的场景，SSE 轻量、走 HTTP、自动重连、对前端友好，是流式输出的事实标准（OpenAI/Anthropic 流式 API 都用 SSE）。
 
+### 1.4 进化：Streamable HTTP（流式 HTTP）★
+
+> SSE 虽好，但在生产环境的 MCP 等协议中暴露出一些问题。Streamable HTTP 是 SSE 的「进化版」，专为 AI 协议设计。
+
+#### 1.4.1 传统 HTTP+SSE 的痛点
+
+早期 MCP 的远程传输用的是「HTTP + SSE 双连接模式」：
+
+```mermaid
+graph LR
+    Client[客户端] -->|POST 发请求| Server[服务器]
+    Client -->|SSE 长连接 收响应| Server
+```
+
+| 痛点 | 说明 |
+|------|------|
+| **双连接** | 一条 HTTP POST 发请求，一条 SSE 长连接收消息——两个通道要关联，状态管理复杂 |
+| **难负载均衡** | SSE 是长连接，传统的 HTTP 负载均衡器对长连接不友好，容易导致某台机器连接过多 |
+| **连接状态重** | 每条 SSE 连接都要维持服务端状态，连接数一多，服务端压力大 |
+| **代理/网关问题** | 某些反向代理、CDN、企业网关会切掉长时间没有数据的「空闲」SSE 连接 |
+| **无状态不友好** | 长连接天然是有状态的，和「无状态 HTTP 服务」的理念冲突，不好水平扩展 |
+
+#### 1.4.2 Streamable HTTP 的核心思想
+
+**一个端点，两种返回——按需升级。**
+
+```mermaid
+graph TB
+    Client[客户端 POST 请求] --> Server[服务器]
+    Server -->|响应方式一：普通 JSON| J[一次性返回<br/>Content-Type: application/json<br/>适用于：快速响应、非流式]
+    Server -->|响应方式二：升级为 SSE 流| S[流式返回<br/>Content-Type: text/event-stream<br/>适用于：流式输出、长任务、进度推送]
+```
+
+**关键设计**：
+
+1. **单端点**：客户端始终向同一个 URL 发 POST 请求，不用区分「发消息的地址」和「收消息的地址」。
+2. **服务端选择返回方式**：服务器可以根据请求内容决定是直接返回 JSON（非流式），还是返回 `text/event-stream`（流式）。
+3. **兼容 HTTP 基础设施**：因为就是普通的 HTTP 请求/响应，所有的负载均衡器、反向代理、CDN、WAF（Web 应用防火墙）都能正常工作。
+4. **无状态友好**：每次请求是独立的 HTTP 请求，服务端不需要维护长连接状态，更容易水平扩展。
+
+#### 1.4.3 完整交互流程
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端
+    participant S as 服务器
+
+    Note over C,S: 场景一：非流式（简单请求）
+    C->>S: POST /mcp {jsonrpc: "2.0", method: "tools/list"}
+    S-->>C: 200 OK {result: [...]}<br/>Content-Type: application/json
+    Note over C,S: 一次请求一次响应，和普通 HTTP API 一样
+
+    Note over C,S: 场景二：流式（长任务/逐步输出）
+    C->>S: POST /mcp {jsonrpc: "2.0", method: "prompts/get", ...}
+    S-->>C: 200 OK<br/>Content-Type: text/event-stream<br/>Transfer-Encoding: chunked
+    S-->>C: data: {"jsonrpc":"2.0","result":{"text":"今"}}
+    S-->>C: data: {"jsonrpc":"2.0","result":{"text":"天"}}
+    S-->>C: data: {"jsonrpc":"2.0","result":{"text":"很"}}
+    S-->>C: data: {"jsonrpc":"2.0","result":{"text":"好"}}
+    S-->>C: data: [DONE]
+    Note over C,S: 同一个端点，服务端选择流式返回
+```
+
+#### 1.4.4 为什么叫「Streamable」（可流式的）
+
+核心在于**可选性**：
+
+- 不是「必须流式」，而是「**可以流式**」。
+- 简单的、快速的请求（如列工具列表、列资源）→ 直接返回 JSON， overhead 最小。
+- 复杂的、需要逐步输出的请求（如调用工具、生成内容）→ 升级为 SSE 流，实时推送进度。
+- 客户端和服务端**协商**决定用哪种方式，而不是强制用长连接。
+
+#### 1.4.5 Streamable HTTP vs 传统 SSE
+
+| 维度 | 传统 HTTP+SSE（双连接） | Streamable HTTP（单端点） |
+|------|----------------------|------------------------|
+| **连接数** | 2 条（1 条发 + 1 条收） | 1 条（请求-响应式） |
+| **负载均衡** | 差（长连接难均衡） | 好（标准 HTTP 请求） |
+| **服务端状态** | 重（维持长连接） | 轻（请求级状态） |
+| **代理/网关兼容性** | 一般（可能被切连接） | 好（标准 HTTP） |
+| **非流式场景 overhead** | 高（也要占一条 SSE 连接） | 低（就是普通 HTTP） |
+| **水平扩展** | 难（有状态） | 易（无状态 HTTP） |
+| **流式能力** | 有 | 有（按需升级为 SSE） |
+| **代表协议** | 早期 MCP、早期流式 API | MCP 1.0+、Anthropic API 新版 |
+
+> 💡 **面试金句**：Streamable HTTP 不是取代 SSE，而是**把 SSE 变成了 HTTP 响应的一个「可选模式」**——平时是普通的 JSON API，需要流式的时候就切到 SSE 模式。既保留了 SSE 流式推送的能力，又继承了 HTTP 的所有优点（负载均衡、缓存、代理友好、无状态扩展）。这是 AI 协议从「能用」走向「生产级」的重要演进。
+
 ---
 
 ## 二、MCP（Model Context Protocol）★
@@ -224,7 +311,7 @@
    Anthropic 2024.11 提出的开放协议，标准化 Agent 与工具/数据源的连接，把 M×N 集成变成 M+N。架构是 Host/Client/Server，能力原语是 Tools/Resources/Prompts。
 
 2. **MCP 的传输方式有哪些？为什么从 HTTP+SSE 改成 Streamable HTTP？**
-   stdio（本地子进程）和 Streamable HTTP（远程）。旧 HTTP+SSE 双连接难负载均衡、状态重，新 Streamable HTTP 单端点可灵活返回 JSON 或升级 SSE 流，更适合生产。
+   stdio（本地子进程）和 Streamable HTTP（远程）。旧 HTTP+SSE 是双连接模式（一条 POST 发、一条 SSE 收），难负载均衡、连接状态重、代理兼容性差。Streamable HTTP 统一为单端点：客户端始终发 POST，服务端按需选择返回普通 JSON（非流式）或升级为 SSE 流（流式），既保留了流式能力，又继承了 HTTP 负载均衡好、无状态易扩展、代理友好的优点，更适合生产环境。（详见「1.4 Streamable HTTP」小节）
 
 3. **MCP 和 Function Calling 什么关系？**
    MCP 是协议层（标准化工具发现/调用/通信），Function Calling 是模型层（模型输出结构化调用）。MCP Server 暴露的工具最终靠 Function Calling 被模型调用，二者配合不冲突。

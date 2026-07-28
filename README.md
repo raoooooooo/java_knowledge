@@ -222,6 +222,16 @@
 | [07-ClaudeCode与Harness原理.md](./13-AI与大模型/07-ClaudeCode与Harness原理.md) | Harness定义(运行时编排/模型是大脑Harness是身体)、Agent Loop真实运行、自动压缩Auto-Compact、子Agent隔离Task、多Agent并行Workflow、工具系统(MCP扩展)、Skill落地、权限沙箱、Hooks、计划模式、与Cursor/Cline/Devin对比 |
 | [08-Agent工程化与生产部署.md](./13-AI与大模型/08-Agent工程化与生产部署.md) | 可视化编排(Dify/Coze/FastGPT/LangFlow)、LLM可观测(Trace/Token/延迟/LangSmith-Langfuse-Phoenix)、评测Eval(LLM-as-Judge/RAGAS/在线AB)、API网关、多模型路由(级联/降级/缓存)、Agent注册中心与灰度发布、安全合规(内容审核/权限RBAC/Prompt注入防护/PII脱敏/Agent特有风险)、生产部署架构 |
 
+#### AI 记忆机制系列（`13-AI与大模型/`）
+
+| 文件 | 核心内容 |
+|------|---------|
+| [09-AI记忆机制-01-全景与三层架构.md](./13-AI与大模型/09-AI记忆机制-01-全景与三层架构.md) | AI记忆三层架构(LLM内核层/Agent系统层/全局生态层)、4W+1E框架(When/What/How/Which/Evaluate)、记忆效能五维评估(召回/准确/时效/成本/业务价值)、成熟度模型L1-L5、10+张Mermaid图、资料勘误6条 |
+| [10-AI记忆机制-02-LLM记忆原理与KV Cache.md](./13-AI与大模型/10-AI记忆机制-02-LLM记忆原理与KV Cache.md) | LLM两种记忆(参数/激活)、自注意力机制原理(Q/K/V/多头)、KV Cache核心思想与O(N²)→O(N)优化、KV Cache大小计算公式与数值例子、四大存储挑战(容量/碎片/带宽/分布式)、单机优化(量化/GQA/PagedAttention/Prefix Cache/滑动窗口)、分布式优化(张量并行/流水并行/上下文并行/Ring Attention)、选型指南、资料勘误6条 |
+| [11-AI记忆机制-03-Agent记忆原理与工程实践.md](./13-AI与大模型/11-AI记忆机制-03-Agent记忆原理与工程实践.md) | Agent为什么需要记忆(三大局限)、记忆≠对话历史、四分类(工作/情景/语义/程序)、五层记忆金字塔(L1寄存器→L5归档)、提升/降级流动机制、路径加载(固定/动态/混合)、写入三原则(选择性/结构化/可验证)、共享与复用四维度、五大设计陷阱、资料勘误5条 |
+| [12-AI记忆机制-04-记忆检索效率提升技术.md](./13-AI与大模型/12-AI记忆机制-04-记忆检索效率提升技术.md) | 检索三大挑战、LLM端优化(滑动窗口/稀疏注意力/FlashAttention/位置编码/Prompt结构)、Agent端五代演进、混合检索(稀疏+稠密+融合+Rerank)、查询改写5种技术、QMD机制(Query-Memory-Decision闭环)、元数据过滤、语义缓存、Claude Code三层记忆实现、LangChain/Mem0对比、资料勘误5条 |
+| [13-AI记忆机制-05-业界趋势与未来展望.md](./13-AI与大模型/13-AI记忆机制-05-业界趋势与未来展望.md) | 三波浪潮(RAG附属→独立层→核心能力)、六大趋势(独立记忆层/多模态/主动管理/集体记忆/长上下文融合/安全隐私)、短中长期路线图、技术选型建议、资料勘误5条+系列总结 |
+
 ---
 
 ### 15 - Agent开发面试实战

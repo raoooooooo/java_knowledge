@@ -65,31 +65,36 @@ IoC 是思想，DI 是 IoC 的主流实现手段（另一种是 DL，但很少�
 
 #### 1. 继承体系（一张图看懂）
 
-```
-                  BeanFactory (顶层接口：定义 getBean 等基础能力)
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-ListableBeanFactory  HierarchicalBeanFactory  AutowireCapableBeanFactory
-(可列举所有Bean)      (父子容器层级)            (自动装配能力)
-        │              │              │
-        └──────┬───────┘              │
-               │                      │
-       ConfigurableListableBeanFactory
-               │
-       DefaultListableBeanFactory  ◄── Spring 内部默认实现， BeanDefinition 的注册中心
-               
-  ──────────────────────────────────────────────
-  
-            ApplicationContext (扩展接口：面向应用，功能更全)
-                       │
-       ┌───────────────┼─────────────────────┐
-       │               │                     │
- ClassPathXml    AnnotationConfig      GenericApplicationContext
- Application     ApplicationContext    (通用实现，Web 容器多基于它)
- Context         (注解驱动)
-       │
- GenericWebApplicationContext / AnnotationConfigWebApplicationContext
+```mermaid
+graph TB
+    subgraph bf_layer["BeanFactory 体系（底层接口）"]
+        BF["BeanFactory<br/>顶层接口：定义 getBean 等基础能力"]
+        LBF["ListableBeanFactory<br/>可列举所有 Bean"]
+        HBF["HierarchicalBeanFactory<br/>父子容器层级"]
+        ACBF["AutowireCapableBeanFactory<br/>自动装配能力"]
+        CLBF["ConfigurableListableBeanFactory"]
+        DLBF["DefaultListableBeanFactory<br/>Spring 默认实现<br/>BeanDefinition 注册中心"]
+
+        BF --- LBF
+        BF --- HBF
+        BF --- ACBF
+        LBF --- CLBF
+        HBF --- CLBF
+        CLBF --- DLBF
+    end
+
+    subgraph ctx_layer["ApplicationContext 体系（面向应用）"]
+        AC["ApplicationContext<br/>扩展接口：面向应用，功能更全"]
+        CPX["ClassPathXmlApplicationContext<br/>XML 配置"]
+        ACA["AnnotationConfigApplicationContext<br/>注解驱动"]
+        GAC["GenericApplicationContext<br/>通用实现，Web 容器多基于它"]
+        GWAC["GenericWebApplicationContext /<br/>AnnotationConfigWebApplicationContext"]
+
+        AC --- CPX
+        AC --- ACA
+        AC --- GAC
+        GAC --- GWAC
+    end
 ```
 
 #### 2. BeanFactory vs ApplicationContext ⭐⭐
@@ -138,20 +143,15 @@ public interface BeanDefinition {
 
 #### 2. 图纸怎么来：Reader 与 Scanner
 
-```
- 配置源(XML/注解/Java类)
-        │
-        ▼
- ┌───────────────────────────┐
- │ BeanDefinitionReader       │  ← XmlBeanDefinitionReader
- │ / ClassPathBeanDefinitionScanner │  ← 处理 @ComponentScan 递归扫描
- └───────────────────────────┘
-        │  生成 RootBeanDefinition / GenericBeanDefinition
-        ▼
- ┌───────────────────────────┐
- │ BeanDefinitionRegistry     │  ← DefaultListableBeanFactory 实现它
- │   registerBeanDefinition() │     图纸注册到 registry
- └───────────────────────────┘
+```mermaid
+graph TD
+    A["配置源<br/>(XML/注解/Java 类)"] --> B["BeanDefinitionReader /<br/>ClassPathBeanDefinitionScanner"]
+    B -->|"XmlBeanDefinitionReader<br/>处理 @ComponentScan 递归扫描"| C["生成<br/>RootBeanDefinition /<br/>GenericBeanDefinition"]
+    C --> D["BeanDefinitionRegistry<br/>registerBeanDefinition()"]
+    D -->|"DefaultListableBeanFactory 实现<br/>图纸注册到 registry"| E["注册完成"]
+
+    style B fill:#e1f5fe
+    style D fill:#e8f5e9
 ```
 
 - `XmlBeanDefinitionReader`：解析 `<bean>` 标签生成 BeanDefinition。
@@ -174,36 +174,20 @@ public interface BeanDefinition {
 
 把 Bean 想象成一栋房子，Spring 容器是装修公司，整个生命周期就是"**看图纸 -> 盖毛坯 -> 装修 -> 验收挂牌 -> 住人 -> 拆迁**"：
 
-```
-① 看图纸          找到 BeanDefinition（图纸），决定要造个什么样的 Bean
-   │                （比如：造 UserService，单例，按构造器 new）
-   ▼
-② 盖毛坯          new 出对象（调构造器），此刻属性还是 null
-   │                就像房子框架搭好了，但里面空空荡荡没家具
-   ▼
-③ 装家具          属性填充：@Autowired 把依赖塞进来
-   │                就像往房子里搬沙发、装水电——房子"活"起来了
-   ▼
-④ 告知身份        Aware 回调：告诉 Bean "你叫什么名字、你在哪个工厂"
-   │                就像物业给房子登记门牌号、发小区通行证
-   ▼
-⑤ 预检            BeanPostProcessor 前置处理（执行 @PostConstruct）
-   │                就像装修队长进场前先检查一遍：插头通电没？
-   ▼
-⑥ 初始化          afterPropertiesSet -> 自定义 init-method
-   │                就像正式"通电测试"，房子各项功能就绪
-   ▼
-⑦ 精加工 ⭐        BeanPostProcessor 后置处理——AOP 代理就在这里生成！
-   │                就像给房子套上"智能外壳"（代理），从此进出都先过门禁
-   ▼
-⑧ 挂牌入住        放进单例池，别人 getBean 就能拿到成品
-   │                就像房子正式交付，挂上"已售"，住户可以入住了
-   ▼
-⑨ 使用            业务代码天天用它
-   │
-   ▼
-⑩ 拆迁            容器关闭时销毁：@PreDestroy -> destroy() -> destroy-method
-                    就像拆迁：先断水断电(@PreDestroy)，再拆除
+```mermaid
+graph TD
+    S1["① 看图纸"] -->|"找到 BeanDefinition，决定造什么样的 Bean<br/>（如：造 UserService，单例，按构造器 new）"| S2["② 盖毛坯"]
+    S2 -->|"new 出对象（调构造器），属性还是 null<br/>房子框架搭好，里面空空荡荡"| S3["③ 装家具"]
+    S3 -->|"属性填充：@Autowired 把依赖塞进来<br/>搬沙发、装水电——房子活起来了"| S4["④ 告知身份"]
+    S4 -->|"Aware 回调：告诉 Bean 名字、所在工厂<br/>物业登记门牌号、发小区通行证"| S5["⑤ 预检"]
+    S5 -->|"BeanPostProcessor 前置处理<br/>(执行 @PostConstruct)<br/>装修队长进场前检查：插头通电没？"| S6["⑥ 初始化"]
+    S6 -->|"afterPropertiesSet → 自定义 init-method<br/>正式通电测试，各项功能就绪"| S7["⑦ 精加工 ⭐"]
+    S7 -->|"BeanPostProcessor 后置处理<br/>AOP 代理就在这里生成！<br/>给房子套上智能外壳（代理），进出都过门禁"| S8["⑧ 挂牌入住"]
+    S8 -->|"放进单例池，getBean 拿到成品<br/>正式交付，挂上已售，住户可以入住"| S9["⑨ 使用"]
+    S9 -->|"业务代码天天用它"| S10["⑩ 拆迁"]
+    S10 -->|"容器关闭时销毁<br/>@PreDestroy → destroy() → destroy-method<br/>先断水断电，再拆除"| END["完成"]
+
+    style S7 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 **记住这个顺序口诀**（面试速答版）：
@@ -218,80 +202,77 @@ public interface BeanDefinition {
 
 
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  阶段A：BeanDefinition 准备阶段（refresh 的 invokeBeanFactoryPostProcessors） │
-└─────────────────────────────────────────────────────────────────────┘
-                  │
-                  ▼
-  ① BeanFactoryPostProcessor.postProcessBeanFactory()
-     ├── 可修改/新增/删除 BeanDefinition
-     ├── ConfigurationClassPostProcessor 处理 @Configuration/@ComponentScan
-     │   /@Import/@Bean/@PropertySource，注册新的 BeanDefinition
-     └── PropertySourcesPlaceholderConfigurer 替换 ${...} 占位符
-                  │
-                  ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  阶段B：单个 Bean 的创建流程（getBean -> createBean）                    │
-└─────────────────────────────────────────────────────────────────────┘
-                  │
-                  ▼
-  ② 实例化 createBeanInstance()
-     ├── 推断构造器：SmartInstantiationAwareBeanPostProcessor
-     │   .determineCandidateConstructors()
-     ├── 实例化前短路：InstantiationAwareBeanPostProcessor
-     │   .postProcessBeforeInstantiation()  (返回非 null 就跳过后续 new)
-     └── 反射调用构造器，得到"半成品"对象（属性还是 null）
-                  │
-                  ▼
-  ③ 实例化后、属性填充前
-     InstantiationAwareBeanPostProcessor.postProcessAfterInstantiation()
-     └── 返回 false 可短路整个 populateBean
-                  │
-                  ▼
-  ④ 属性填充 populateBean()
-     ├── @Autowired / @Value / @Resource 由
-     │   AutowiredAnnotationBeanPostProcessor.postProcessProperties() 注入
-     └── CommonAnnotationBeanPostProcessor 处理 @Resource
-                  │
-                  ▼
-  ⑤ Aware 接口回调（顺序固定）
-     ├── BeanNameAware.setBeanName(name)
-     ├── BeanClassLoaderAware.setBeanClassLoader(loader)
-     └── BeanFactoryAware.setBeanFactory(factory)
-                  │
-                  ▼
-  ⑥ 容器级 Aware（通过 ApplicationContextAwareProcessor 这个 BeanPostProcessor）
-     ├── EnvironmentAware / ResourceLoaderAware
-     ├── ApplicationEventPublisherAware
-     └── ApplicationContextAware
-                  │
-                  ▼
-  ⑦ BeanPostProcessor.postProcessBeforeInitialization()
-     └── CommonAnnotationBeanPostProcessor 在此执行 @PostConstruct
-                  │
-                  ▼
-  ⑧ InitializingBean.afterPropertiesSet()
-                  │
-                  ▼
-  ⑨ 自定义 init-method（XML init-method 或 @Bean(initMethod=...)）
-                  │
-                  ▼
-  ⑩ BeanPostProcessor.postProcessAfterInitialization()  ⭐ AOP 在这里
-     └── AnnotationAwareAspectJAutoProxyCreator.postProcessAfterInitialization()
-         若命中切面，返回代理对象（JDK/CGLIB）
-                  │
-                  ▼
-  ⑪ 放入单例池 singletonObjects（一级缓存），完成创建
-                  │
-                  ▼
-  ⑫ 使用
-                  │
-                  ▼
-  ⑬ 销毁（容器关闭时）
-     ├── @PreDestroy  (CommonAnnotationBeanPostProcessor 的销毁回调)
-     ├── DisposableBean.destroy()
-     └── 自定义 destroy-method
+```mermaid
+graph TD
+    subgraph phaseA["阶段 A：BeanDefinition 准备阶段<br/>（refresh 的 invokeBeanFactoryPostProcessors）"]
+        S1["① BeanFactoryPostProcessor.postProcessBeanFactory()"]
+        S1a["可修改/新增/删除 BeanDefinition"]
+        S1b["ConfigurationClassPostProcessor 处理<br/>@Configuration/@ComponentScan/@Import/@Bean/@PropertySource<br/>注册新的 BeanDefinition"]
+        S1c["PropertySourcesPlaceholderConfigurer<br/>替换 ${...} 占位符"]
+        S1 --- S1a
+        S1 --- S1b
+        S1 --- S1c
+    end
+
+    phaseA --> phaseB
+
+    subgraph phaseB["阶段 B：单个 Bean 的创建流程（getBean → createBean）"]
+        S2["② 实例化 createBeanInstance()"]
+        S2a["推断构造器：SmartInstantiationAwareBeanPostProcessor<br/>.determineCandidateConstructors()"]
+        S2b["实例化前短路：InstantiationAwareBeanPostProcessor<br/>.postProcessBeforeInstantiation()<br/>（返回非 null 就跳过后续 new）"]
+        S2c["反射调用构造器，得到半成品对象（属性还是 null）"]
+        S2 --- S2a
+        S2 --- S2b
+        S2 --- S2c
+
+        S2 --> S3["③ 实例化后、属性填充前<br/>InstantiationAwareBeanPostProcessor<br/>.postProcessAfterInstantiation()<br/>返回 false 可短路整个 populateBean"]
+
+        S3 --> S4["④ 属性填充 populateBean()"]
+        S4a["@Autowired / @Value<br/>AutowiredAnnotationBeanPostProcessor<br/>.postProcessProperties() 注入"]
+        S4b["@Resource<br/>CommonAnnotationBeanPostProcessor 处理"]
+        S4 --- S4a
+        S4 --- S4b
+
+        S4 --> S5["⑤ Aware 接口回调（顺序固定）"]
+        S5a["BeanNameAware.setBeanName(name)"]
+        S5b["BeanClassLoaderAware.setBeanClassLoader(loader)"]
+        S5c["BeanFactoryAware.setBeanFactory(factory)"]
+        S5 --- S5a
+        S5 --- S5b
+        S5 --- S5c
+
+        S5 --> S6["⑥ 容器级 Aware<br/>（ApplicationContextAwareProcessor）"]
+        S6a["EnvironmentAware / ResourceLoaderAware"]
+        S6b["ApplicationEventPublisherAware"]
+        S6c["ApplicationContextAware"]
+        S6 --- S6a
+        S6 --- S6b
+        S6 --- S6c
+
+        S6 --> S7["⑦ BeanPostProcessor<br/>.postProcessBeforeInitialization()<br/>CommonAnnotationBeanPostProcessor<br/>在此执行 @PostConstruct"]
+
+        S7 --> S8["⑧ InitializingBean.afterPropertiesSet()"]
+
+        S8 --> S9["⑨ 自定义 init-method<br/>(XML init-method 或 @Bean initMethod)"]
+
+        S9 --> S10["⑩ BeanPostProcessor.postProcessAfterInitialization() ⭐ AOP 在这里"]
+        S10a["AnnotationAwareAspectJAutoProxyCreator<br/>.postProcessAfterInitialization()<br/>若命中切面，返回代理对象（JDK/CGLIB）"]
+        S10 --- S10a
+
+        S10 --> S11["⑪ 放入单例池 singletonObjects<br/>（一级缓存），完成创建"]
+
+        S11 --> S12["⑫ 使用"]
+
+        S12 --> S13["⑬ 销毁（容器关闭时）"]
+        S13a["@PreDestroy<br/>(CommonAnnotationBeanPostProcessor 销毁回调)"]
+        S13b["DisposableBean.destroy()"]
+        S13c["自定义 destroy-method"]
+        S13 --- S13a
+        S13 --- S13b
+        S13 --- S13c
+    end
+
+    style S10 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 #### 3. 三个初始化方法的执行顺序 ⭐⭐
@@ -327,16 +308,20 @@ postProcessAfterInitialization(bean, beanName):
 
 A 依赖 B、B 依赖 A 的循环依赖解决流程：
 
-```
-createA: 
-  实例化A(②) → 把 A 的 ObjectFactory 放进三级缓存 → 属性填充A(④)
-    发现要 B → createB:
-      实例化B → 把 B 的 ObjectFactory 放三级缓存 → 属性填充B
-        发现要 A → getBean("A") → 三级缓存里找到 A 的 ObjectFactory
-          → 执行 SmartInstantiationAwareBeanPostProcessor.getEarlyBeanReference()
-            （这里 AOP 提前生成代理！）→ 提前暴露 A 的代理 → 放二级缓存
-        → B 拿到 A 的代理，B 创建完成 → 放一级缓存
-    → A 拿到 B，A 创建完成 → 放一级缓存（清除二、三级）
+```mermaid
+graph TD
+    A1["createA：实例化 A（②）"] --> A2["把 A 的 ObjectFactory 放进三级缓存"]
+    A2 --> A3["属性填充 A（④）<br/>发现依赖 B"]
+    A3 --> B1["createB：实例化 B"]
+    B1 --> B2["把 B 的 ObjectFactory 放进三级缓存"]
+    B2 --> B3["属性填充 B<br/>发现依赖 A"]
+    B3 --> B4["getBean(\"A\")<br/>三级缓存找到 A 的 ObjectFactory"]
+    B4 --> B5["执行 getEarlyBeanReference()<br/>⭐ AOP 提前生成代理"]
+    B5 --> B6["提前暴露 A 的代理<br/>放入二级缓存，删除三级缓存"]
+    B6 --> B7["B 拿到 A 的代理<br/>B 创建完成，放入一级缓存"]
+    B7 --> A4["A 拿到 B<br/>A 创建完成，放入一级缓存<br/>（清除二、三级）"]
+
+    style B5 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 > ⚠️ **易错点**：只有**singleton + 构造器以外的注入方式**能解决循环依赖。**构造器循环依赖无法解决**（实例化阶段就要依赖，但此时半成品还没生成），Spring 会抛 `BeanCurrentlyInCreationException`。

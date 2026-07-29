@@ -23,16 +23,16 @@
 
 **Starter 的组成**：
 
-```
-my-starter/
-├── pom.xml                         # 聚合依赖
-├── XxxAutoConfiguration.java       # 自动配置类（注册核心 Bean）
-├── XxxProperties.java              # 配置属性类（绑定 prefix 的配置）
-└── META-INF/
-    ├── spring.factories            # SpringBoot 2.x：注册自动配置类
-    └── spring/
-        └── org.springframework.boot.autoconfigure.AutoConfiguration.imports
-                                    # SpringBoot 3.x：注册自动配置类（取代 spring.factories）
+```mermaid
+graph TD
+    ROOT["my-starter/"]
+    ROOT --> POM["pom.xml<br/>聚合依赖"]
+    ROOT --> AC["XxxAutoConfiguration.java<br/>自动配置类（注册核心 Bean）"]
+    ROOT --> PROP["XxxProperties.java<br/>配置属性类（绑定 prefix 的配置）"]
+    ROOT --> MI["META-INF/"]
+    MI --> SF["spring.factories<br/>SpringBoot 2.x：注册自动配置类"]
+    MI --> SP["spring/"]
+    SP --> IMPORTS["org.springframework.boot.autoconfigure.AutoConfiguration.imports<br/>SpringBoot 3.x：注册自动配置类（取代 spring.factories）"]
 ```
 
 > 💡 **底层原理一句话**：Starter 的本质是「jar 包 + 自动配置类的注册声明」。SpringBoot 启动时扫描 `META-INF` 下的注册文件，加载声明的 `AutoConfiguration` 类，再由 `@Conditional` 注解按条件装配 Bean。
@@ -192,29 +192,18 @@ public class DemoController {
 
 **完整流程图**：
 
-```
- 引入 starter jar
-      │
-      ▼
- SpringBoot 启动
-      │
-      ▼
- 扫描 META-INF 下的注册文件
-   ├─ 2.x: spring.factories
-   └─ 3.x: AutoConfiguration.imports
-      │
-      ▼
- 加载 HelloAutoConfiguration
-      │
-      ▼
- @ConditionalOnClass  ──── classpath 有 HelloService? ── Yes ──┐
- @ConditionalOnProperty ── hello.enabled=true? ───── Yes ─────┤
-      │                                                        │
-      ▼                                                        ▼
-   No 跳过                                          注册 HelloService Bean
-                                                            │
-                                                            ▼
-                                                  业务代码 @Autowired 使用
+```mermaid
+graph TD
+    S1["引入 starter jar"] --> S2["SpringBoot 启动"]
+    S2 --> S3["扫描 META-INF 下的注册文件<br/>2.x: spring.factories<br/>3.x: AutoConfiguration.imports"]
+    S3 --> S4["加载 HelloAutoConfiguration"]
+    S4 --> S5{"条件判断<br/>@ConditionalOnClass: classpath 有 HelloService?<br/>@ConditionalOnProperty: hello.enabled=true?"}
+    S5 -->|否| SKIP["跳过，不装配"]
+    S5 -->|是| REG["注册 HelloService Bean"]
+    REG --> USE["业务代码 @Autowired 使用"]
+
+    style SKIP fill:#ffebee
+    style REG fill:#e8f5e9
 ```
 
 ---
@@ -514,23 +503,13 @@ public class OrderService {
 
 **原理**：
 
-```
-配置中心（Nacos / Spring Cloud Config）变更
-      │
-      ▼
- 客户端监听到变更，触发 /actuator/refresh
-      │
-      ▼
- ContextRefresher.refresh()
-      │
-      ▼
- 销毁 @RefreshScope 标记的 Bean（不立即重建）
-      │
-      ▼
- 下次访问该 Bean 时，重新走 Bean 创建流程
-      │
-      ▼
- @Value 重新从最新 Environment 注入 -> 配置生效
+```mermaid
+graph TD
+    S1["配置中心（Nacos / Spring Cloud Config）变更"] --> S2["客户端监听到变更，触发 /actuator/refresh"]
+    S2 --> S3["ContextRefresher.refresh()"]
+    S3 --> S4["销毁 @RefreshScope 标记的 Bean（不立即重建）"]
+    S4 --> S5["下次访问该 Bean 时，重新走 Bean 创建流程"]
+    S5 --> S6["@Value 重新从最新 Environment 注入 → 配置生效"]
 ```
 
 **核心机制**：`@RefreshScope` 让 Spring 给这个 Bean 生成一个 **CGLIB 代理**，代理内部持有一个「目标 Bean 引用」。refresh 时把目标引用销毁，下次调用代理方法时**懒加载重建**目标 Bean，重建过程中 `@Value` 会读到最新配置。

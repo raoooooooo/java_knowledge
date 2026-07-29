@@ -192,26 +192,31 @@ public class RateLimitAspect {
 
 AOP的术语容易混，先上图：
 
-```
-            ┌─────────────────────────────────────────────┐
-            │                Aspect（切面）                 │
-            │   = Pointcut + Advice 组合（一个带@Aspect的类）  │
-            │                                             │
-            │   @Pointcut("execution(* com.xx..*.*(..))")  │ ◀── 筛选规则
-            │   @Before("pointcut()") / @After(...)        │ ◀── 干什么+何时
-            └──────────────────────┬──────────────────────┘
-                                   │ 织入 Weaving
-                                   ▼
-    ┌────────────────────┐    ┌────────────────────┐
-    │  Target（目标对象）   │───▶│  Proxy（代理对象）   │
-    │  UserService原始实例 │    │  被包裹了通知的代理   │
-    │  没有任何切面代码     │    │  调用addUser会先过  │
-    │                    │    │  拦截器链再走原始方法 │
-    └────────────────────┘    └────────────────────┘
-                                   │
-                                   ▼
-                    JoinPoint（连接点）：可以被增强的「点」
-                    Spring AOP 里 = 方法的执行（不含字段/构造器）
+```mermaid
+graph TB
+    subgraph Aspect_box["Aspect（切面）<br/>= Pointcut + Advice 组合（一个带 @Aspect 的类）"]
+        P["@Pointcut(\"execution(* com.xx..*.*(..))\")<br/>◀ 筛选规则"]
+        A["@Before(\"pointcut()\") / @After(...) / @Around<br/>◀ 干什么 + 何时"]
+    end
+
+    Aspect_box -->|"织入 Weaving"| Proxy
+
+    subgraph Target_box["Target（目标对象）"]
+        T1["UserService 原始实例"]
+        T2["没有任何切面代码"]
+    end
+
+    subgraph Proxy_box["Proxy（代理对象）"]
+        P1["被包裹了通知的代理"]
+        P2["调用 addUser 会先过<br/>拦截器链再走原始方法"]
+    end
+
+    Target_box --> Proxy_box
+    Proxy_box --> JP["JoinPoint（连接点）<br/>可以被增强的点<br/>Spring AOP 里 = 方法的执行"]
+
+    style Aspect_box fill:#f3e5f5
+    style Target_box fill:#e8f5e9
+    style Proxy_box fill:#fff3e0
 ```
 
 逐个术语解释（**一定要区分 Pointcut 和 JoinPoint，面试最爱混**）：
@@ -317,34 +322,37 @@ public class LogAspect {
 
 时序图（新版本，正常流程）：
 
-```
-@Around前 ──┐
-            │
-@Before ────┤
-            │
-业务方法 ───┤
-            │
-@AfterReturning ─┤  ◀── 正常返回后执行
-            │
-@After ─────┤  ◀── finally，最后执行（与 AspectJ 对齐）
-            │
-@Around后 ──┘
+```mermaid
+sequenceDiagram
+    participant A as @Around前
+    participant B as @Before
+    participant T as 业务方法
+    participant R as @AfterReturning
+    participant F as @After
+    participant Z as @Around后
+
+    A->>B: 进入
+    B->>T: 进入
+    T->>R: 正常返回
+    R->>F: ◀ finally，最后执行（与 AspectJ 对齐）
+    F->>Z: 返回
 ```
 
 **拦截器链的本质（责任链模式）**：
 
-```
-调用代理方法
-     │
-     ▼
- ┌─────────┐    ┌─────────┐    ┌──────────┐    ┌─────────┐
- │ Expose  │ -> │ Around  │ -> │ Before   │ -> │ 业务方法 │
- │ Invocat │    │ Advice  │    │ Advice   │    │ (target) │
- └─────────┘    └─────────┘    └──────────┘    └─────────┘
-                     │                              │
-                     │  proceed()之后回溯执行：     │
-                     │  @AfterReturning -> @After -> @Around后
-                     ▼
+```mermaid
+graph LR
+    Call["调用代理方法"] --> EI["ExposeInvocation"]
+    EI --> AA["Around Advice"]
+    AA --> BA["Before Advice"]
+    BA --> TM["业务方法 (target)"]
+
+    AA -.->|"proceed() 回溯执行<br/>@AfterReturning → @After → @Around 后"| RET["返回"]
+
+    style EI fill:#e3f2fd
+    style AA fill:#fff3e0
+    style BA fill:#fff3e0
+    style TM fill:#e8f5e9
 ```
 
 ---
@@ -491,36 +499,27 @@ AnnotationAwareAspectJAutoProxyCreator        ◀── 解析 @Aspect/@Pointcut
 
 #### 2. 代理生成的时机：postProcessAfterInitialization
 
-```
-Bean 生命周期（简化）：
-  实例化(instantiate) 
-    -> 属性注入(populateBean) 
-    -> 初始化(initializeBean: Aware接口 -> BeanPostProcessor#before -> init-method -> BeanPostProcessor#after)
-                                                                              │
-                                                                              ▼
-                                              AbstractAutoProxyCreator#postProcessAfterInitialization
-                                                                              │
-                                                                              ▼
-                                                                    wrapIfNecessary()
-                                                                              │
-                                            ┌─────────────────────────────────┴───────────────────────┐
-                                            ▼                                                           ▼
-                                1. 找出所有 @Aspect 切面                              2. 用每个 Advisor 的 Pointcut
-                                   解析成 Advisor 列表                                   匹配当前 Bean 的方法
-                                            │                                                           │
-                                            └──────────────────────────────┬──────────────────────────┘
-                                                                           ▼
-                                                              匹配上? -> createProxy() 创建代理
-                                                                                   │
-                                                              ┌────────────────────┴───────────────────┐
-                                                              ▼                                        ▼
-                                                  目标有接口 && !proxyTargetClass               否则
-                                                  -> JdkDynamicAopProxy                       -> ObjenesisCglibAopProxy
-                                                              │                                        │
-                                                              └────────────────┬───────────────────────┘
-                                                                               ▼
-                                                                   代理对象放回容器
-                                                                   （之后 getBean 拿到的就是代理）
+```mermaid
+graph TD
+    Start["Bean 生命周期（简化）<br/>实例化 → 属性注入 → 初始化<br/>(Aware → BPP#before → init-method → BPP#after)"]
+    Start --> PAOP["AbstractAutoProxyCreator<br/>#postProcessAfterInitialization"]
+    PAOP --> WIN["wrapIfNecessary()"]
+
+    WIN --> S1["① 找出所有 @Aspect 切面<br/>解析成 Advisor 列表"]
+    WIN --> S2["② 用每个 Advisor 的 Pointcut<br/>匹配当前 Bean 的方法"]
+    S1 --> MATCH{"匹配上？"]
+    S2 --> MATCH
+
+    MATCH -->|是| CP["createProxy() 创建代理"]
+    CP --> JDK{"目标有接口 && !proxyTargetClass"}
+    JDK -->|是| JD["JdkDynamicAopProxy"]
+    JDK -->|否| CG["ObjenesisCglibAopProxy"]
+    JD --> RESULT["代理对象放回容器<br/>之后 getBean 拿到的就是代理"]
+    CG --> RESULT
+
+    MATCH -->|否| NOOP["返回原始对象，不代理"]
+
+    style CP fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 **核心流程说明**：
@@ -570,26 +569,18 @@ public Object proceed() throws Throwable {
 
 **责任链示意**（以 @Around + @Before + @After 为例）：
 
-```
-proceed() 调用链（往内走）：
-  AroundInterceptor.invoke(mi)
-     │ 1. 执行 @Around 前半
-     │ 2. mi.proceed() ──────────────┐
-     │                               ▼
-     │                   BeforeInterceptor.invoke(mi)
-     │                      │ 1. 执行 @Before
-     │                      │ 2. mi.proceed() ────────────┐
-     │                      │                             ▼
-     │                      │                 AfterInterceptor.invoke(mi)
-     │                      │                    │ try { mi.proceed() ────┐
-     │                      │                    │                        ▼
-     │                      │                    │            invokeJoinpoint()  ◀── 真正的业务方法
-     │                      │                    │                        │
-     │                      │                    │             } finally {
-     │                      │                    │               执行 @After   ◀── finally 语义
-     │                      │                    │             }
-     │                      │ 3. 执行 @Before 后续（无）
-     │ 3. 执行 @Around 后半（或异常分支）
+```mermaid
+graph TD
+    A["AroundInterceptor.invoke(mi)"]
+    A -->|"1. 执行 @Around 前半"| B["mi.proceed()"]
+    B --> C["BeforeInterceptor.invoke(mi)"]
+    C -->|"1. 执行 @Before"| D["mi.proceed()"]
+    D --> E["AfterInterceptor.invoke(mi)"]
+    E -->|"try { mi.proceed()"| F["invokeJoinpoint()<br/>◀ 真正的业务方法"]
+    F -->|正常返回| G["} finally {<br/>执行 @After<br/>◀ finally 语义"]
+    G --> H["AfterInterceptor 返回"]
+    H -->|"2. @Before 后续（无）"| I["BeforeInterceptor 返回"]
+    I -->|"3. 执行 @Around 后半（或异常分支）"| J["AroundInterceptor 返回"]
 ```
 
 #### 4. 与循环依赖的呼应 ⭐⭐
@@ -619,23 +610,18 @@ public Object getEarlyBeanReference(Object bean, String beanName) {
 
 **流程**（以 A、B 循环依赖为例，A 需要 AOP 代理）：
 
-```
-1. 创建 A：实例化 A -> 把 A 的 ObjectFactory 放进三级缓存
-2. 给 A 注入属性 B：发现 B 没创建
-3. 创建 B：实例化 B -> 给 B 注入属性 A
-     │ 发现 A 还没完成（一级缓存没有）
-     │ 从三级缓存拿 A 的 ObjectFactory，调 getObject()
-     │  -> 触发 getEarlyBeanReference(A)
-     │  -> 此时 A 被提前生成代理 A_proxy
-     │  -> A_proxy 放进二级缓存，三级缓存移除 A
-     ▼
-4. B 拿到 A_proxy，注入完成，B 完成（B 是原始对象，因为 B 不需要 AOP）
-5. 回到 A 的属性注入，A 拿到 B
-6. A 执行 postProcessAfterInitialization
-     -> wrapIfNecessary：检查 earlyProxyReferences 里有没有 A
-     -> 有！说明已经提前生成过代理，直接复用，不再重复创建
-     ▼
-7. A 完成初始化，把二级缓存的 A_proxy 提升到一级缓存
+```mermaid
+graph TD
+    S1["1. 创建 A：实例化 A → 把 A 的 ObjectFactory 放进三级缓存"]
+    S1 --> S2["2. 给 A 注入属性 B：发现 B 没创建"]
+    S2 --> S3["3. 创建 B：实例化 B → 给 B 注入属性 A"]
+    S3 --> S4["发现 A 还没完成（一级缓存没有）<br/>从三级缓存拿 A 的 ObjectFactory，调 getObject()<br/>→ 触发 getEarlyBeanReference(A)<br/>⭐ 此时 A 被提前生成代理 A_proxy<br/>→ A_proxy 放进二级缓存，三级缓存移除 A"]
+    S4 --> S5["4. B 拿到 A_proxy，注入完成<br/>B 完成（B 是原始对象，因为 B 不需要 AOP）"]
+    S5 --> S6["5. 回到 A 的属性注入，A 拿到 B"]
+    S6 --> S7["6. A 执行 postProcessAfterInitialization<br/>wrapIfNecessary：检查 earlyProxyReferences 里有没有 A<br/>→ 有！说明已提前生成过代理，直接复用，不再重复创建"]
+    S7 --> S8["7. A 完成初始化<br/>把二级缓存的 A_proxy 提升到一级缓存"]
+
+    style S4 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 ⚠️ **关键点**：`getEarlyBeanReference` 只在**循环依赖时**才被调用。如果没有循环依赖，代理正常在 `postProcessAfterInitialization` 阶段生成。所以「AOP 是否会提前生成代理」取决于有没有循环依赖。
@@ -695,21 +681,26 @@ public class UserService {
 
 **为什么失效？**
 
-```
-外部调用 userService.methodA()：
-   ┌────────────────────────────────┐
-   │   UserService$$Cglib（代理）    │ ◀── 容器里注入的是这个
-   │   methodA() {                  │
-   │     拦截器链.proceed()         │
-   │        -> 调用 target.methodA()│ ◀── target 是原始 UserService 实例
-   │           (this = target)      │
-   │              │                 │
-   │              ▼                 │
-   │           this.methodB()       │ ◀── 这里的 this 是 target 原始对象
-   │              │                 │     直接调，没经过代理！
-   │              ▼                 │     事务/切面全部失效
-   │           原始 methodB()       │
-   └────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph Proxy["UserService$$Cglib（代理）<br/>◀ 容器里注入的是这个"]
+        PM_A["methodA() {"]
+        IC["拦截器链.proceed()"]
+        TGT["调用 target.methodA()<br/>◀ target 是原始 UserService 实例<br/>(this = target)"]
+        PM_A --> IC --> TGT
+    end
+
+    subgraph Target["原始 UserService 实例"]
+        THIS["this.methodB()<br/>◀ 这里的 this 是 target 原始对象<br/>直接调，没经过代理！<br/>事务/切面全部失效"]
+        MB["原始 methodB()"]
+        THIS --> MB
+    end
+
+    TGT --> THIS
+    Proxy -.代理失效.-> Target
+
+    style Proxy fill:#e3f2fd
+    style Target fill:#ffebee
 ```
 
 **根因**：代理对象只能拦截「从外部进入代理的方法调用」，一旦进入了 `target.methodA()`，方法体内的 `this` 就是 target 本身，再调 `this.methodB()` 走的是原始对象的方法分派，绕过了代理。

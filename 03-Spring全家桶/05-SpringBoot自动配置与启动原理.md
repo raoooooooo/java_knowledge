@@ -78,60 +78,41 @@ public @interface EnableAutoConfiguration {
 
 核心方法调用链（SpringBoot 2.7+ 源码）：
 
-```
-selectImports()
-   └──> getAutoConfigurationEntry()
-          ├──> getCandidateConfigurations()      // 读候选配置类清单
-          ├──> removeDuplicates()                 // 去重
-          ├──> getConfigurationsOrderFilter()    // 根据 @AutoConfigureOrder/Before/After 排序
-          └──-> filter()                          // @Conditional 条件过滤
+```mermaid
+graph TD
+    SI["selectImports()"] --> GACE["getAutoConfigurationEntry()"]
+    GACE --> GCC["getCandidateConfigurations()<br/>// 读候选配置类清单"]
+    GACE --> RD["removeDuplicates()<br/>// 去重"]
+    GACE --> ODF["getConfigurationsOrderFilter()<br/>// 根据 @AutoConfigureOrder/Before/After 排序"]
+    GACE --> FILT["filter()<br/>// @Conditional 条件过滤"]
 ```
 
 **核心流程图**：
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     SpringBoot 自动配置全链路                       │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A["@SpringBootApplication"] --> B["@EnableAutoConfiguration<br/>@Import"]
+    B --> C["AutoConfigurationImportSelector.selectImports()"]
+    C --> D["getAutoConfigurationEntry()"]
 
-   @SpringBootApplication
-            │
-            ▼
-   @EnableAutoConfiguration
-            │ @Import
-            ▼
-   AutoConfigurationImportSelector.selectImports()
-            │
-            ▼
-   getAutoConfigurationEntry()
-            │
-            ├─① 读候选配置类清单（getCandidateConfigurations）
-            │       │
-            │       ▼
-            │   ┌──────────────────────────────────────────────┐
-            │   │  SpringBoot 2.7- : META-INF/spring.factories │
-            │   │  key=EnableAutoConfiguration -> [类名列表]    │
-            │   │                                              │
-            │   │  SpringBoot 2.7+: 新增 imports 文件           │
-            │   │  META-INF/spring/...AutoConfiguration.imports │
-            │   │  (一行一个类名，更清晰)                       │
-            │   │                                              │
-            │   │  SpringBoot 3.0+: 只认 imports 文件           │
-            │   │  (spring.factories 中自动配置不再支持 ⚠️)      │
-            │   └──────────────────────────────────────────────┘
-            │
-            ├─② 去重（removeDuplicates）
-            │
-            ├─③ 排序（@AutoConfigureOrder / @AutoConfigureBefore / @AutoConfigureAfter）
-            │
-            └─④ 条件过滤（filter，执行 AutoConfigurationImportFilter）
-                    │
-                    ▼
-              逐个评估 @ConditionalXxx
-              只有条件满足的配置类才注册为 BeanDefinition
-                    │
-                    ▼
-              最终生效的自动配置类（通常 30~100 个，远小于候选数 200+）
+    D --> STEP1["① 读候选配置类清单<br/>getCandidateConfigurations()"]
+    subgraph CANDIDATE["候选清单来源"]
+        V1["SpringBoot 2.7- :<br/>META-INF/spring.factories<br/>key=EnableAutoConfiguration → 类名列表"]
+        V2["SpringBoot 2.7+ :<br/>新增 imports 文件<br/>META-INF/spring/...AutoConfiguration.imports<br/>(一行一个类名)"]
+        V3["SpringBoot 3.0+ :<br/>只认 imports 文件<br/>(spring.factories 自动配置不再支持 ⚠️)"]
+    end
+    STEP1 --> CANDIDATE
+
+    D --> STEP2["② 去重<br/>removeDuplicates()"]
+    D --> STEP3["③ 排序<br/>@AutoConfigureOrder / @AutoConfigureBefore / @AutoConfigureAfter"]
+    D --> STEP4["④ 条件过滤<br/>filter / AutoConfigurationImportFilter"]
+    STEP4 --> EVAL["逐个评估 @ConditionalXxx<br/>只有条件满足的才注册为 BeanDefinition"]
+    EVAL --> RESULT["最终生效的自动配置类<br/>通常 30~100 个，远小于候选数 200+"]
+
+    style STEP1 fill:#e3f2fd
+    style STEP2 fill:#fff3e0
+    style STEP3 fill:#e8f5e9
+    style STEP4 fill:#f3e5f5
 ```
 
 #### 3. 候选清单的读取（版本演变，超高频考点）⭐⭐⭐
@@ -235,22 +216,17 @@ public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySourc
 
 **应用类型推断（`WebApplicationType.deduceFromClasspath`）**：
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                  WebApplicationType 推断逻辑                 │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    START["classpath 检查（按优先级）"] --> CHECK1{"① 存在 DispatcherHandler(Reactive)<br/>且 不存在 DispatcherServlet<br/>且 不存在 Servlet ?"}
+    CHECK1 -->|是| REACTIVE["REACTIVE<br/>(WebFlux)"]
+    CHECK1 -->|否| CHECK2{"② 存在 DispatcherServlet 或<br/>存在 Servlet 或<br/>存在 ConfigurableWebApplicationContext ?"}
+    CHECK2 -->|是| SERVLET["SERVLET<br/>(传统 Web)"]
+    CHECK2 -->|否| NONE["NONE<br/>(非 Web，如命令行工具)"]
 
-  classpath 检查（按优先级）：
-
-  ① 存在 DispatcherHandler(Reactive) 且
-    不存在 DispatcherServlet 且
-    不存在 Servlet                ──> REACTIVE (WebFlux)
-
-  ② 存在 DispatcherServlet 或
-    存在 Servlet 或
-    存在 ConfigurableWebApplicationContext ──> SERVLET (传统Web)
-
-  ③ 都不存在                      ──> NONE (非Web，如命令行工具)
+    style REACTIVE fill:#e8f5e9
+    style SERVLET fill:#e3f2fd
+    style NONE fill:#fff3e0
 ```
 
 > **类比理解**：SpringBoot 启动前先「望闻问切」——看看 classpath 上有什么药（类），就推断你得了什么病（应用类型），对症下药（选合适的 ApplicationContext）。
@@ -307,62 +283,30 @@ public ConfigurableApplicationContext run(String... args) {
 
 **完整时序图**：
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                  SpringApplication.run() 启动时序                    │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    N["new SpringApplication()"]
+    N_note["① 推断 WebApplicationType<br/>② 读 spring.factories: Initializer / Listener<br/>③ 推断 main 类"]
+    N --- N_note
 
-  new SpringApplication()
-       │
-       │ ① 推断 WebApplicationType
-       │ ② 读 spring.factories: Initializer / Listener
-       │ ③ 推断 main 类
-       ▼
-  run()
-       │
-       │ ──> listeners.starting()
-       │       发布 ApplicationStartingEvent
-       │
-       │ ──> prepareEnvironment()
-       │       加载 application.yml + 命令行参数 + profile
-       │       发布 ApplicationEnvironmentPreparedEvent
-       │
-       │ ──> printBanner()  打印 Banner
-       │
-       │ ──> createApplicationContext()
-       │       按 WebApplicationType 选上下文类型
-       │
-       │ ──> prepareContext()
-       │       setEnvironment
-       │       执行 ApplicationContextInitializer.initialize()  ★
-       │       注册主配置类（启动类）
-       │       发布 contextPrepared 事件
-       │       发布 contextLoaded 事件
-       │
-       │ ──> refreshContext()  ★★★ 核心
-       │       │
-       │       ▼
-       │     AbstractApplicationContext.refresh()  （12 步，见下节）
-       │       - 解析配置类，注册 BeanDefinition
-       │       - 实例化所有单例 Bean
-       │       - 启动内嵌 Tomcat
-       │       - 发布 ContextRefreshedEvent
-       │
-       │ ──> afterRefresh()  默认空实现
-       │
-       │ ──> listeners.started()
-       │       发布 ApplicationStartedEvent
-       │       ★ 此时容器已刷新，所有 Bean 就绪
-       │
-       │ ──> callRunners()  ★ 执行 Runner
-       │       获取所有 ApplicationRunner / CommandLineRunner
-       │       按 @Order 排序后依次执行
-       │
-       │ ──> listeners.ready()
-       │       发布 ApplicationReadyEvent
-       │       ★ 应用完全就绪，可对外服务
-       ▼
-   return context
+    N --> R["run()"]
+
+    R --> S1["listeners.starting()<br/>发布 ApplicationStartingEvent"]
+    S1 --> S2["prepareEnvironment()<br/>加载 application.yml + 命令行参数 + profile<br/>发布 ApplicationEnvironmentPreparedEvent"]
+    S2 --> S3["printBanner()  打印 Banner"]
+    S3 --> S4["createApplicationContext()<br/>按 WebApplicationType 选上下文类型"]
+    S4 --> S5["prepareContext()<br/>setEnvironment<br/>执行 ApplicationContextInitializer.initialize() ★<br/>注册主配置类（启动类）<br/>发布 contextPrepared / contextLoaded 事件"]
+    S5 --> S6["refreshContext()  ★★★ 核心"]
+    S6_detail["AbstractApplicationContext.refresh()（12 步）<br/>- 解析配置类，注册 BeanDefinition<br/>- 实例化所有单例 Bean<br/>- 启动内嵌 Tomcat<br/>- 发布 ContextRefreshedEvent"]
+    S6 --- S6_detail
+    S6 --> S7["afterRefresh()  默认空实现"]
+    S7 --> S8["listeners.started()<br/>发布 ApplicationStartedEvent<br/>★ 此时容器已刷新，所有 Bean 就绪"]
+    S8 --> S9["callRunners()  ★ 执行 Runner<br/>获取所有 ApplicationRunner / CommandLineRunner<br/>按 @Order 排序后依次执行"]
+    S9 --> S10["listeners.ready()<br/>发布 ApplicationReadyEvent<br/>★ 应用完全就绪，可对外服务"]
+    S10 --> END["return context"]
+
+    style S6 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style S9 fill:#e8f5e9
 ```
 
 > ⚠️ **Runner 执行时机（铁律3重点纠偏）**：
@@ -377,21 +321,28 @@ public ConfigurableApplicationContext run(String... args) {
 
 `refreshContext()` 最终调用 `AbstractApplicationContext.refresh()`，这是 Spring 容器初始化的核心方法。完整代码是一长串步骤，这里列出关键几步（源码中按顺序）：
 
-```
-refresh() {
-  1. prepareRefresh()              // 准备：设启动时间、活动标志、校验必要属性
-  2. obtainFreshBeanFactory()     // 获取 BeanFactory（已存在）
-  3. prepareBeanFactory()         // 配置 BeanFactory：ClassLoader、忽略接口、后置处理器
-  4. postProcessBeanFactory()     // 子类扩展点（Web 上下文在此注册 scope）
-  5. invokeBeanFactoryPostProcessors()  ★★★ 关键
-  6. registerBeanPostProcessors()  ★★ 关键
-  7. initMessageSource()          // 国际化
-  8. initApplicationEventMulticaster()  // 事件广播器
-  9. onRefresh()                  ★★★ 关键：Web 上下文在此启动 Tomcat
- 10. registerListeners()          // 注册 ApplicationListener
- 11. finishBeanFactoryInitialization()  ★★★ 关键：实例化所有非懒加载单例 Bean
- 12. finishRefresh()              // 发布 ContextRefreshedEvent
-}
+```mermaid
+graph TD
+    RF["refresh()"]
+
+    R1["1. prepareRefresh()<br/>准备：设启动时间、活动标志、校验必要属性"]
+    R2["2. obtainFreshBeanFactory()<br/>获取 BeanFactory"]
+    R3["3. prepareBeanFactory()<br/>配置 BeanFactory：ClassLoader、忽略接口、后置处理器"]
+    R4["4. postProcessBeanFactory()<br/>子类扩展点（Web 上下文在此注册 scope）"]
+    R5["5. invokeBeanFactoryPostProcessors()  ★★★ 关键"]
+    R6["6. registerBeanPostProcessors()  ★★ 关键"]
+    R7["7. initMessageSource()<br/>国际化"]
+    R8["8. initApplicationEventMulticaster()<br/>事件广播器"]
+    R9["9. onRefresh()  ★★★ 关键：Web 上下文在此启动 Tomcat"]
+    R10["10. registerListeners()<br/>注册 ApplicationListener"]
+    R11["11. finishBeanFactoryInitialization()  ★★★ 关键：实例化所有非懒加载单例 Bean"]
+    R12["12. finishRefresh()<br/>发布 ContextRefreshedEvent"]
+
+    RF --> R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> R8 --> R9 --> R10 --> R11 --> R12
+
+    style R5 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style R9 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style R11 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
 
 > **关于「13 步」的说法**：有些资料说 `refresh()` 是 13 步，实际是把 `finishRefresh()` 中的 `registerLifecycleProcessor()`、`publishEvent()` 等细化拆出来算的。核心流程就是上述 12 个方法，**不必纠结具体数字**，重点是理解每一步做了什么、什么时机触发什么。
@@ -402,16 +353,15 @@ refresh() {
 
 这一步执行所有 `BeanFactoryPostProcessor`，其中最重要的是 **`ConfigurationClassPostProcessor`**，它负责：
 
-```
-ConfigurationClassPostProcessor 解析配置类：
-   │
-   ├─ 解析 @Configuration 标记的类
-   ├─ 处理 @ComponentScan：触发包扫描，注册 BeanDefinition
-   ├─ 处理 @Import：导入其他配置类
-   │      └─ 这里导入了 AutoConfigurationImportSelector
-   │         触发自动配置类的加载（候选清单 -> 去重 -> 排序 -> @Conditional 过滤）
-   ├─ 处理 @Bean 方法：注册为 BeanDefinition
-   └─ 处理 @PropertySource、@ComponentScans 等
+```mermaid
+graph TD
+    CCPP["ConfigurationClassPostProcessor<br/>解析配置类"]
+    CCPP --> C1["解析 @Configuration 标记的类"]
+    CCPP --> C2["处理 @ComponentScan<br/>触发包扫描，注册 BeanDefinition"]
+    CCPP --> C3["处理 @Import：导入其他配置类"]
+    C3 --> C3a["这里导入了 AutoConfigurationImportSelector<br/>触发自动配置类加载<br/>（候选清单 → 去重 → 排序 → @Conditional 过滤）"]
+    CCPP --> C4["处理 @Bean 方法：注册为 BeanDefinition"]
+    CCPP --> C5["处理 @PropertySource、@ComponentScans 等"]
 ```
 
 > **关键点**：自动配置类的加载发生在这一步！`AutoConfigurationImportSelector` 实现了 `DeferredImportSelector`（延迟导入选择器），会在所有 `@Configuration` 解析完后再执行，保证用户自定义的 Bean 先注册、自动配置的 Bean 后注册（这是 `@ConditionalOnMissingBean` 能生效的前提）。
@@ -433,27 +383,14 @@ ConfigurationClassPostProcessor 解析配置类：
 
 **实例化所有非懒加载的单例 Bean**，走完整生命周期：
 
-```
-Bean 生命周期（简化）：
-  实例化 (instantiate)
-     │
-     ▼
-  属性填充 (populateBean)  ← @Autowired/@Value 在此注入
-     │
-     ▼
-  BeanNameAware / BeanFactoryAware / ApplicationContextAware
-     │
-     ▼
-  BeanPostProcessor.postProcessBeforeInitialization  ← @PostConstruct 在此
-     │
-     ▼
-  InitializingBean.afterPropertiesSet / init-method
-     │
-     ▼
-  BeanPostProcessor.postProcessAfterInitialization  ← AOP 代理在此创建
-     │
-     ▼
-  Bean 就绪，放入单例池
+```mermaid
+graph TD
+    L1["实例化 instantiate"] --> L2["属性填充 populateBean<br/>← @Autowired/@Value 在此注入"]
+    L2 --> L3["BeanNameAware / BeanFactoryAware / ApplicationContextAware"]
+    L3 --> L4["BeanPostProcessor.postProcessBeforeInitialization<br/>← @PostConstruct 在此"]
+    L4 --> L5["InitializingBean.afterPropertiesSet / init-method"]
+    L5 --> L6["BeanPostProcessor.postProcessAfterInitialization<br/>← AOP 代理在此创建"]
+    L6 --> L7["Bean 就绪，放入单例池"]
 ```
 
 **⑤ `finishRefresh()`（第 12 步）**
@@ -530,13 +467,9 @@ private void createWebServer() {
 
 `WebServer.start()` 真正启动 Tomcat、绑定端口的时机是在 `finishRefresh()` 阶段（`refresh()` 最后一步附近）。准确说：
 
-```
-refresh() 中 Web 容器的两阶段：
-
-  onRefresh()           ← 创建 WebServer 实例、准备 ServletContext
-     │
-     ▼
-  finishRefresh()       ← 调用 webServer.start()，绑定端口，对外服务
+```mermaid
+graph TD
+    OR["onRefresh()<br/>← 创建 WebServer 实例、准备 ServletContext"] --> FR["finishRefresh()<br/>← 调用 webServer.start()，绑定端口，对外服务"]
 ```
 
 > **类比理解**：`onRefresh` 像「把车造好、加好油」，`finishRefresh` 像「点火发动、上路」。两者分开是为了在容器启动过程中能执行一些初始化逻辑（如注册 ServletContextInitializer）。

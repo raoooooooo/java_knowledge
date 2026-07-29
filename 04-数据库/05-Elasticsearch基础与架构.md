@@ -163,12 +163,23 @@ node.roles: []                   # 不参与 master/data/ingest，仅 coordinati
 - **Replica Shard（副本）**：主分片的拷贝，提供**高可用**（主挂了副本提升为主）和**读扩展**（读可走副本分担压力）。
 - 副本**永远不会**和它的主分片在同一个节点上（否则该节点挂了主备都没了）。
 
-```
-索引 logs，2个主分片，每个1个副本，共4个分片，分布在2节点：
+```mermaid
+graph TB
+    subgraph NodeA["Node A"]
+        P0["P0（主分片）"]
+        R1["R1（副本）"]
+    end
 
-Node A:  P0(主)  R1(副本)
-Node B:  P1(主)  R0(副本)
+    subgraph NodeB["Node B"]
+        P1["P1（主分片）"]
+        R0["R0（副本）"]
+    end
+
+    P0 -.-> R0
+    P1 -.-> R1
 ```
+
+索引 logs，2 个主分片，每个 1 个副本，共 4 个分片，分布在 2 个节点。虚线表示主-副本对应关系。
 
 ### 4.2 ⚠️ 主分片数创建后不能改（高频面试题）
 
@@ -253,19 +264,13 @@ shard = hash(routing) % number_of_primary_shards
 
 Master 变更 cluster state 采用**两阶段发布**保证一致性：
 
-```
-Master 计算出新 cluster state
-  │
-  ▼
-【阶段1 publish】发布新状态给所有节点
-  -> 每个节点确认收到（记录但暂不 apply）
-  -> 必须拿到 quorum 节点确认才算成功
-  -> 收不到确认的节点会重试，超时则认为该节点失联
-  │
-  ▼
-【阶段2 commit】提交
-  -> 通知所有节点 apply 新状态
-  -> 各节点 apply（如本地初始化新分片、移除旧分片）
+```mermaid
+graph TD
+    A["Master 计算出新 cluster state"]
+    --> B["阶段 1：publish<br/>发布新状态给所有节点"]
+    --> C["每个节点确认收到（记录但暂不 apply）<br/>必须拿到 quorum 节点确认才算成功<br/>收不到确认的节点会重试，超时则认为失联"]
+    --> D["阶段 2：commit<br/>通知所有节点 apply 新状态"]
+    --> E["各节点 apply（如本地初始化新分片、移除旧分片）"]
 ```
 
 - 这种 publish-then-commit 的设计保证：**不会出现部分节点用新状态、部分用旧状态的撕裂**。
@@ -297,13 +302,14 @@ Master 计算出新 cluster state
 
 ### 7.2 选举流程
 
-```
-1. master-eligible 节点互相 ping，发现彼此
-2. 若无活着的 Master，触发选举：
-   a. 比较各节点的 term + cluster state 版本
-   b. 选出 term 最高、cluster state 最新的节点为 Master 候选
-   c. 候选向其他 eligible 节点拉票，过半同意则当选
-3. 当选 Master 开始发布 cluster state，其余转为 follower
+```mermaid
+graph TD
+    A["1. master-eligible 节点互相 ping，发现彼此"]
+    --> B["2. 若无活着的 Master，触发选举"]
+    --> C["a. 比较各节点的 term + cluster state 版本"]
+    --> D["b. 选出 term 最高、cluster state 最新的节点为 Master 候选"]
+    --> E["c. 候选向其他 eligible 节点拉票，过半同意则当选"]
+    --> F["3. 当选 Master 开始发布 cluster state，其余转为 follower"]
 ```
 
 ### 7.3 故障检测与剔除
@@ -387,19 +393,14 @@ cluster.routing.allocation.awareness.attributes: rack
 
 ### 9.1 Recovery 阶段
 
-```
-分片需要恢复（如节点重启后副本需要重建）
-  │
-  ▼
-INIT          初始化，准备 recovery
-  ▼
-INDEX         从源分片拷贝数据（或基于已有 segment 增量同步）+ 回放 translog
-  ▼
-VERIFY        校验
-  ▼
-FINALIZE      收尾（如清理临时文件）
-  ▼
-DONE          分片可用
+```mermaid
+stateDiagram-v2
+    [*] --> INIT: 分片需要恢复（如节点重启后副本需要重建）
+    INIT --> INDEX: 初始化，准备 recovery
+    INDEX --> VERIFY: 从源分片拷贝数据（或基于已有 segment 增量同步）+ 回放 translog
+    VERIFY --> FINALIZE: 校验
+    FINALIZE --> DONE: 收尾（如清理临时文件）
+    DONE --> [*]: 分片可用
 ```
 
 - 主分片恢复：本地已有 segment 则用本地，再用 translog 回放到最新。
@@ -509,10 +510,15 @@ PUT _cluster/settings
 - 这就是「**留一半物理内存给 OS 文件缓存**」的根因：堆给 ES 用，剩下给 page cache 喂 Lucene。堆太大反而挤占 page cache，读性能下降。
 - 还有 direct memory（Netty 网络缓冲）等。
 
-```
-物理内存 128GB 的 data 节点：
-  JVM Heap 31GB（ES 用）  +  Page Cache ~97GB（Lucene mmap 用）
-  不能把 31GB 堆调成 64GB——挤掉 page cache，读变慢，还触发 GC。
+```mermaid
+graph LR
+    subgraph mem["物理内存 128GB 的 data 节点"]
+        direction LR
+        Heap["JVM Heap 31GB<br/>ES 用"]
+        PageCache["Page Cache ~97GB<br/>Lucene mmap 用"]
+    end
+
+    Note["不能把 31GB 堆调成 64GB——挤掉 page cache，读变慢，还触发 GC"]
 ```
 
 ### 11.3 Circuit Breaker（熔断器）★
@@ -561,12 +567,13 @@ PUT _cluster/settings
 
 ### 12.3 容量规划
 
-```
-预估总数据量 D（含副本后）
-  -> 单分片目标 30~50GB，得 主分片数 P = D / 50GB（向上取整，留 20% 余量）
-  -> 副本数 R（通常 1），总存储 = D × (1+R) × 写放大系数(1.1~1.3)
-  -> 单节点磁盘容量 = 总存储 / data 节点数
-  -> 校验：每节点分片数 ≤ 每GB堆 × 20（如堆 31G → 单节点 ≤ 620 分片）
+```mermaid
+graph TD
+    A["预估总数据量 D（含副本后）"]
+    --> B["单分片目标 30~50GB<br/>主分片数 P = D / 50GB（向上取整，留 20% 余量）"]
+    --> C["副本数 R（通常 1）<br/>总存储 = D × (1+R) × 写放大系数(1.1~1.3)"]
+    --> D["单节点磁盘容量 = 总存储 / data 节点数"]
+    --> E["校验：每节点分片数 ≤ 每GB堆 × 20<br/>如堆 31G → 单节点 ≤ 620 分片"]
 ```
 
 - 时序数据用 **ILM + 滚动索引**：单索引不要无限大，按天/大小 rollover，便于 TTL 清理和分片均衡。

@@ -71,32 +71,28 @@ public class TransferService {
 
 #### 1. 整体工作流程（必背）
 
-```
-调用方               代理对象($Proxy)                 目标对象(TransferService)
-  │                      │                                │
-  ├─ transfer(...) ─────>│                                │
-  │                      │ ① TransactionInterceptor.invoke()
-  │                      │ ② createTransactionIfNecessary
-  │                      │    - 解析 @Transactional 属性
-  │                      │    - 按传播行为决定 开新事务/加入事务
-  │                      │    - DataSourceTransactionManager.doBegin()
-  │                      │      connection.setAutoCommit(false)
-  │                      │      绑定 Connection 到 ThreadLocal
-  │                      │                                │
-  │                      │ ③ invocation.proceed() ────────>│ 执行 transfer()
-  │                      │                                │   - debit(...)
-  │                      │                                │   - credit(...)
-  │                      │<──────── 返回 / 抛异常 ─────────┤
-  │                      │                                │
-  │                      │ ④a 正常: commitTransactionAfterReturning
-  │                      │      -> txManager.commit() -> connection.commit()
-  │                      │ 或
-  │                      │ ④b 异常: completeTransactionAfterThrowing
-  │                      │      - 按 rollbackFor 判断
-  │                      │      - 命中: rollback()  不命中: commit()
-  │                      │ ⑤ cleanupTransactionInfo
-  │                      │    - 解绑 ThreadLocal 中的 Connection
-  │<─── 返回 / 抛出 ─────┤
+```mermaid
+sequenceDiagram
+    participant Caller as 调用方
+    participant Proxy as 代理对象($Proxy)
+    participant Target as 目标对象(TransferService)
+
+    Caller->>Proxy: transfer(...)
+    Note over Proxy: ① TransactionInterceptor.invoke()
+    Note over Proxy: ② createTransactionIfNecessary<br/>- 解析 @Transactional 属性<br/>- 按传播行为决定 开新事务/加入事务<br/>- DataSourceTransactionManager.doBegin()<br/>  connection.setAutoCommit(false)<br/>  绑定 Connection 到 ThreadLocal
+    
+    Proxy->>Target: ③ invocation.proceed()
+    Note over Target: 执行 transfer()<br/>- debit(...)<br/>- credit(...)
+    Target-->>Proxy: 返回 / 抛异常
+    
+    alt 正常返回
+        Note over Proxy: ④a commitTransactionAfterReturning<br/>→ txManager.commit() → connection.commit()
+    else 异常
+        Note over Proxy: ④b completeTransactionAfterThrowing<br/>- 按 rollbackFor 判断<br/>- 命中: rollback()  不命中: commit()
+    end
+    
+    Note over Proxy: ⑤ cleanupTransactionInfo<br/>- 解绑 ThreadLocal 中的 Connection
+    Proxy-->>Caller: 返回 / 抛出
 ```
 
 #### 2. 核心组件与源码脉络
@@ -164,20 +160,33 @@ protected void doBegin(Object transaction, TransactionDefinition definition) {
 
 #### 4. 事务与 ThreadLocal 的绑定
 
-```
-       线程 Thread-A                          线程 Thread-B
-            │                                       │
-   ┌────────┴────────┐                     ┌─────────┴────────┐
-   │ ThreadLocal Map  │                     │ ThreadLocal Map  │
-   │ ┌──────────────┐ │                     │ ┌──────────────┐ │
-   │ │DataSource -> │ │                     │ │DataSource -> │ │
-   │ │ConnectionHolder│ │                     │ │ConnectionHolder│ │
-   │ │ (Connection#1)│ │                     │ │ (Connection#2)│ │
-   │ └──────────────┘ │                     │ └──────────────┘ │
-   └─────────────────┘                     └─────────────────┘
-            │                                       │
-       Mapper 用 #1                            Mapper 用 #2
-       （同一事务）                              （另一事务）
+```mermaid
+graph TB
+    subgraph TA["线程 Thread-A"]
+        TLA["ThreadLocal Map"]
+        subgraph TA_conn[" "]
+            DS1["DataSource →"]
+            CH1["ConnectionHolder<br/>(Connection #1)"]
+        end
+        TLA --> DS1
+        DS1 --> CH1
+    end
+
+    subgraph TB_thread["线程 Thread-B"]
+        TLB["ThreadLocal Map"]
+        subgraph TB_conn[" "]
+            DS2["DataSource →"]
+            CH2["ConnectionHolder<br/>(Connection #2)"]
+        end
+        TLB --> DS2
+        DS2 --> CH2
+    end
+
+    CH1 --> M1["Mapper 用 #1<br/>（同一事务）"]
+    CH2 --> M2["Mapper 用 #2<br/>（另一事务）"]
+
+    style TA fill:#e3f2fd
+    style TB_thread fill:#fce4ec
 ```
 
 > ⚠️ **多线程下事务失效**：ThreadLocal 只绑定当前线程，子线程、`@Async` 异步方法拿不到外层事务的 Connection，事务无法跨线程传播。
@@ -188,33 +197,23 @@ protected void doBegin(Object transaction, TransactionDefinition definition) {
 
 Spring 事务抽象的"三驾马车"，理解它们的关系就懂了 Spring 事务的骨架。
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  TransactionDefinition（事务定义：描述事务"应该是什么样")      │
-│    - getIsolationLevel()     隔离级别                        │
-│    - getPropagationBehavior() 传播行为                       │
-│    - getTimeout()            超时                            │
-│    - isReadOnly()            是否只读                        │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          │ 作为参数传入
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  PlatformTransactionManager（事务管理器：真正干活的人)        │
-│    - getTransaction(def)   开启/获取事务                     │
-│    - commit(status)        提交                              │
-│    - rollback(status)      回滚                              │
-└─────────────────────────────────────────────────────────────┘
-                          │
-                          │ 返回
-                          ▼
-┌─────────────────────────────────────────────────────────────┐
-│  TransactionStatus（事务状态：当前事务运行到哪了)             │
-│    - isNewTransaction()    是否新事务                          │
-│    - hasSavepoint()        是否有保存点（NESTED 用)           │
-│    - setRollbackOnly()     标记只回滚                         │
-│    - isRollbackOnly()      是否被标记只回滚                   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    TD["TransactionDefinition<br/>事务定义：描述事务"应该是什么样""]
+    TD_i["- getIsolationLevel() 隔离级别<br/>- getPropagationBehavior() 传播行为<br/>- getTimeout() 超时<br/>- isReadOnly() 是否只读"]
+    TD --- TD_i
+
+    TD -->|"作为参数传入"| PTM["PlatformTransactionManager<br/>事务管理器：真正干活的人"]
+    PTM_m["- getTransaction(def) 开启/获取事务<br/>- commit(status) 提交<br/>- rollback(status) 回滚"]
+    PTM --- PTM_m
+
+    PTM -->|"返回"| TS["TransactionStatus<br/>事务状态：当前事务运行到哪了"]
+    TS_m["- isNewTransaction() 是否新事务<br/>- hasSavepoint() 是否有保存点（NESTED 用）<br/>- setRollbackOnly() 标记只回滚<br/>- isRollbackOnly() 是否被标记只回滚"]
+    TS --- TS_m
+
+    style TD fill:#e3f2fd
+    style PTM fill:#fff3e0
+    style TS fill:#e8f5e9
 ```
 
 **通俗类比**：去银行办贷款
@@ -363,26 +362,43 @@ public class CouponService {
 
 这是面试必考的对比，画一张调用关系图：
 
-```
-场景：OrderService.createOrder() 内调用 CouponService.use()
+```mermaid
+graph TB
+    subgraph REQ["REQUIRED"]
+        R0["场景：createOrder() 内调用 use()"]
+        R1["外层 createOrder<br/>└─ 开启事务 T1"]
+        R2["内层 use()<br/>└─ 加入 T1<br/>(共享同一 Connection)"]
+        R3["use() 抛异常<br/>→ 整个 T1 标记 rollbackOnly<br/>→ T1 最终回滚"]
+        R1 --> R2 --> R3
+    end
 
-【REQUIRED】                          【REQUIRES_NEW】              【NESTED】
-  外层 createOrder                    外层 createOrder              外层 createOrder
-  └─ 开启事务 T1                      └─ 开启事务 T1                └─ 开启事务 T1
-      └─ use()                            └─ use()                    └─ use()
-         加入 T1                             挂起 T1                      T1 内创建 savepoint
-         (共享同一 Connection)                开启独立 T2                  (仍共享 T1 的 Connection)
-         use() 抛异常                         use() 抛异常                 use() 抛异常
-         → 整个 T1 标记 rollbackOnly          → T2 回滚                    → 回滚到 savepoint
-         → T1 最终回滚                        → T1 不受影响                → T1 继续运行
-                                             → T2 释放，T1 恢复           → T1 提交时嵌套部分也提交
+    subgraph RNEW["REQUIRES_NEW"]
+        N0[" "]
+        N1["外层 createOrder<br/>└─ 开启事务 T1"]
+        N2["内层 use()<br/>└─ 挂起 T1，开启独立 T2<br/>(两个不同 Connection)"]
+        N3["use() 抛异常<br/>→ T2 回滚<br/>→ T1 不受影响<br/>→ T2 释放，T1 恢复"]
+        N1 --> N2 --> N3
+    end
 
-关键差异：
- 事务边界     一个事务                两个独立事务                一个事务 + savepoint
- Connection   共用一个                 两个不同                    共用一个
- 内层异常影响  外层必回滚              外层不受影响                 外层可选择回滚
- 外层回滚影响  全回滚                  内层已提交不受影响           内层一起回滚
- 依赖          无                      无                          数据库支持 savepoint（InnoDB 支持）
+    subgraph NEST["NESTED"]
+        E0[" "]
+        E1["外层 createOrder<br/>└─ 开启事务 T1"]
+        E2["内层 use()<br/>└─ T1 内创建 savepoint<br/>(仍共享 T1 的 Connection)"]
+        E3["use() 抛异常<br/>→ 回滚到 savepoint<br/>→ T1 继续运行<br/>→ T1 提交时嵌套部分也提交"]
+        E1 --> E2 --> E3
+    end
+
+    subgraph DIFF["关键差异对比"]
+        D1["事务边界：一个事务 | 两个独立事务 | 一个事务 + savepoint"]
+        D2["Connection：共用一个 | 两个不同 | 共用一个"]
+        D3["内层异常影响：外层必回滚 | 外层不受影响 | 外层可选择回滚"]
+        D4["外层回滚影响：全回滚 | 内层已提交不受影响 | 内层一起回滚"]
+        D5["依赖：无 | 无 | 数据库支持 savepoint（InnoDB 支持）"]
+    end
+
+    style REQ fill:#e3f2fd
+    style RNEW fill:#fff3e0
+    style NEST fill:#e8f5e9
 ```
 
 > 💡 **选型口诀**：要"一荣俱荣一损俱损"用 REQUIRED；要"井水不犯河水"用 REQUIRES_NEW；要"子可独立回滚、父回滚子也回滚"用 NESTED。

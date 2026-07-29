@@ -13,13 +13,20 @@
 - **正排索引**：文档 -> 词（「文档 1 包含哪些词」）。查「包含某词的文档」要扫所有文档，慢。
 - **倒排索引**：词 -> 文档列表（「这个词出现在哪些文档」）。查「包含某词的文档」直接查词，拿到文档列表，**O(1) 级别**。
 
-```
-正排： doc1 -> [hello, world]
-       doc2 -> [hello, es]
+```mermaid
+graph LR
+    subgraph 正排索引
+        doc1["doc1"] --> hello1["hello"]
+        doc1 --> world1["world"]
+        doc2["doc2"] --> hello2["hello"]
+        doc2 --> es1["es"]
+    end
 
-倒排： hello -> [doc1, doc2]
-       world -> [doc1]
-       es    -> [doc2]
+    subgraph 倒排索引
+        hello3["hello"] --> doc_a["doc1, doc2"]
+        world3["world"] --> doc_b["doc1"]
+        es3["es"] --> doc_c["doc2"]
+    end
 ```
 
 ### 1.2 倒排索引的组成
@@ -77,20 +84,13 @@
 
 文本字段写入和搜索时要先**分词**。Analyzer 由三部分组成：
 
-```
-原始文本
-  │
-  ▼
-[char filter]   字符过滤（如去 HTML 标签）
-  │
-  ▼
-[tokenizer]     分词（切成一个个 token，如按空格/中文切词）
-  │
-  ▼
-[token filter]  token 过滤（转小写、去停用词、同义词、词干化）
-  │
-  ▼
-最终 token 流（建倒排 / 用于搜索）
+```mermaid
+graph TD
+    A["原始文本"]
+    --> B["char filter<br/>字符过滤（如去 HTML 标签）"]
+    --> C["tokenizer<br/>分词（切成一个个 token，如按空格/中文切词）"]
+    --> D["token filter<br/>token 过滤（转小写、去停用词、同义词、词干化）"]
+    --> E["最终 token 流（建倒排 / 用于搜索）"]
 ```
 
 - **character filter**：预处理字符，如 `html_strip` 去 HTML 标签。
@@ -102,9 +102,15 @@
 - **standard analyzer**：ES 默认，对中文会**按字切**（"我爱北京" -> 我/爱/北/京），中文搜索效果差。
 - **ik 分词器**：中文最常用插件，支持 `ik_smart`（粗粒度）和 `ik_max_word`（细粒度，尽可能多切词）。
 
-```
-ik_smart:   我爱北京天安门 -> [我, 爱, 北京, 天安门]
-ik_max_word: 我爱北京天安门 -> [我, 爱, 北京, 天安门, 安门]
+```mermaid
+graph LR
+    subgraph ik_smart["ik_smart（粗粒度）"]
+        A1["我爱北京天安门"] --> B1["我, 爱, 北京, 天安门"]
+    end
+
+    subgraph ik_max["ik_max_word（细粒度）"]
+        A2["我爱北京天安门"] --> B2["我, 爱, 北京, 天安门, 安门"]
+    end
 ```
 
 ### 2.3 ⚠️ 写入分词 vs 搜索分词（高频考点）
@@ -166,13 +172,14 @@ ik_max_word: 我爱北京天安门 -> [我, 爱, 北京, 天安门, 安门]
 
 ### 4.1 写入全流程
 
-```
-1. 写请求到 coordinating 节点 -> 路由到对应主分片所在节点
-2. 主分片节点：
-   a. 写入 indexing buffer（内存 buffer）
-   b. 同时写 translog（WAL，磁盘）
-3. 副本分片：主分片写成功后，并行转发到副本分片写入
-4. 全部成功才返回成功给客户端
+```mermaid
+graph TD
+    A["1. 写请求到 coordinating 节点<br/>路由到对应主分片所在节点"]
+    --> B["2. 主分片节点"]
+    --> C["a. 写入 indexing buffer（内存 buffer）"]
+    --> D["b. 同时写 translog（WAL，磁盘）"]
+    --> E["3. 副本分片：主分片写成功后<br/>并行转发到副本分片写入"]
+    --> F["4. 全部成功才返回成功给客户端"]
 ```
 
 ### 4.2 三个关键动作：refresh / flush / translog
@@ -207,17 +214,24 @@ ik_max_word: 我爱北京天安门 -> [我, 爱, 北京, 天安门, 安门]
 
 ES 的一次搜索分两阶段：
 
-```
-【Query 阶段】
-  coordinating 节点收到请求
-    -> 路由到每个相关分片（primary 或 replica 之一）
-    -> 每个分片本地查询，返回 [docId, score] 的 TopN
-    -> coordinating 节点合并所有分片结果，重排序取最终 TopN
+```mermaid
+graph TD
+    subgraph Query阶段["Query 阶段"]
+        direction TB
+        Q1["coordinating 节点收到请求"]
+        Q2["路由到每个相关分片（primary 或 replica 之一）"]
+        Q3["每个分片本地查询，返回 [docId, score] 的 TopN"]
+        Q4["coordinating 节点合并所有分片结果，重排序取最终 TopN"]
+        Q1 --> Q2 --> Q3 --> Q4
+    end
 
-【Fetch 阶段】
-  coordinating 节点按 docId 去对应分片
-    -> 取出 _source（完整文档）
-    -> 返回给客户端
+    subgraph Fetch阶段["Fetch 阶段"]
+        direction TB
+        F1["coordinating 节点按 docId 去对应分片"]
+        F2["取出 _source（完整文档）"]
+        F3["返回给客户端"]
+        F1 --> F2 --> F3
+    end
 ```
 
 ### 5.2 为什么要两阶段

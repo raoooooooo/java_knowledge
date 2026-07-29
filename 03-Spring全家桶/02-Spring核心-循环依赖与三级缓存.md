@@ -85,33 +85,32 @@ public class DefaultSingletonBeanRegistry {
 
 **三级缓存结构图**：
 
-```
-                DefaultSingletonBeanRegistry
-   ┌──────────────────────────────────────────────────────────┐
-   │                                                          │
-   │  一级 singletonObjects（成品仓库）                          │
-   │  ┌────────────────────────────────────────────┐           │
-   │  │  "userDao"     -> UserDaoImpl@成品代理       │           │
-   │  │  "orderService"-> OrderServiceImpl@成品      │           │
-   │  └────────────────────────────────────────────┘           │
-   │                                                          │
-   │  二级 earlySingletonObjects（半成品货架）                   │
-   │  ┌────────────────────────────────────────────┐           │
-   │  │  "A" -> A 的提前暴露对象（可能已 AOP 代理）     │           │
-   │  └────────────────────────────────────────────┘           │
-   │                                                          │
-   │  三级 singletonFactories（生产工单/图纸）                    │
-   │  ┌────────────────────────────────────────────┐           │
-   │  │  "A" -> ObjectFactory（lambda）              │           │
-   │  │       调用 getObject()                      │           │
-   │  │         -> getEarlyBeanReference(A裸对象)    │           │
-   │  │         -> 可能生成 A 的代理对象               │           │
-   │  └────────────────────────────────────────────┘           │
-   │                                                          │
-   │  + singletonsCurrentlyInCreation（正在创建集合）             │
-   │    {"A", "B"}                                            │
-   │                                                          │
-   └──────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Reg["DefaultSingletonBeanRegistry"]
+        subgraph L1["一级 singletonObjects（成品仓库）"]
+            L1_1["\"userDao\" → UserDaoImpl@成品代理"]
+            L1_2["\"orderService\" → OrderServiceImpl@成品"]
+        end
+
+        subgraph L2["二级 earlySingletonObjects（半成品货架）"]
+            L2_1["\"A\" → A 的提前暴露对象<br/>（可能已 AOP 代理）"]
+        end
+
+        subgraph L3["三级 singletonFactories（生产工单/图纸）"]
+            L3_1["\"A\" → ObjectFactory(lambda)"]
+            L3_2["调用 getObject()"]
+            L3_3["→ getEarlyBeanReference(A 裸对象)"]
+            L3_4["→ 可能生成 A 的代理对象"]
+            L3_1 --> L3_2 --> L3_3 --> L3_4
+        end
+
+        Creating["singletonsCurrentlyInCreation<br/>正在创建集合：{\"A\", \"B\"}"]
+    end
+
+    style L1 fill:#e8f5e9
+    style L2 fill:#fff8e1
+    style L3 fill:#e3f2fd
 ```
 
 三个缓存的「生命周期」与「AOP 时机」密切相关，下面用流程图说清。
@@ -122,64 +121,33 @@ public class DefaultSingletonBeanRegistry {
 
 以 `A -> B -> A`，且 A 需要 AOP 代理为例（这是面试官最想听到的完整流程）：
 
-```
- 调用方              Spring 容器                       缓存状态
-   │                                                    
-   │── getBean("A") ──>│                                
-   │                    │ 1. 一级查无、二三级查无 A         
-   │                    │ 2. 标记 A "正在创建"（加入       
-   │                    │    singletonsCurrentlyInCreation）
-   │                    │ 3. 实例化 A（new 出裸对象，未代理）
-   │                    │ 4. 把 A 的 ObjectFactory 入三级缓存
-   │                    │    singletonFactories.put("A",
-   │                    │      () -> getEarlyBeanReference(A裸对象))
-   │                    │                                
-   │                    │── populateBean(A)              
-   │                    │  发现依赖 B，递归调用          
-   │                    │                                
-   │                    │── getBean("B") ───────────┐   
-   │                    │                            │   
-   │                    │ 5. 一级查无 B、二三级查无 B  
-   │                    │ 6. 标记 B "正在创建"        
-   │                    │ 7. 实例化 B（裸对象）        
-   │                    │ 8. B 的 ObjectFactory 入三级缓存
-   │                    │                                
-   │                    │── populateBean(B)              
-   │                    │  发现依赖 A，递归调用          
-   │                    │                                
-   │                    │── getBean("A") ──────────┐   
-   │                    │                          │   
-   │                    │ 9. 一级查无 A、二级查无 A  
-   │                    │    从三级缓存取 A 的 ObjectFactory
-   │                    │    执行 getObject()        
-   │                    │      -> 触发 SmartInstantiationAware
-   │                    │         BeanPostProcessor 
-   │                    │         .getEarlyBeanReference()
-   │                    │      -> 生成 A 的代理对象   
-   │                    │ 10. 代理 A 放入二级缓存     
-   │                    │     earlySingletonObjects.put("A", 代理A)
-   │                    │     三级缓存删除 A          
-   │                    │                                
-   │                    │<── 返回 代理 A              
-   │                    │                                
-   │                    │ B 拿到 A（代理 A），完成属性填充
-   │                    │ B 完成初始化                
-   │                    │ 11. B 进入一级缓存          
-   │                    │     singletonObjects.put("B", B)
-   │                    │     删除 B 的二三级缓存      
-   │                    │                                
-   │                    │<── 返回 B                  
-   │                    │                                
-   │ A 拿到 B，完成属性填充                                  
-   │ A 完成初始化                                          
-   │   (postProcessAfterInitialization 阶段               
-   │    AbstractAutoProxyCreator 检测 wrappedBean 已存在,   
-   │    复用已生成的代理 A，避免重复代理)                     
-   │ 12. A 进入一级缓存                                    
-   │     singletonObjects.put("A", 代理A)                  
-   │     删除 A 的二三级缓存                                
-   │                                                        
-   │<── 返回 代理 A                                         
+```mermaid
+sequenceDiagram
+    participant Caller as 调用方
+    participant Container as Spring容器
+    participant Cache as 缓存状态
+
+    Caller->>Container: getBean("A")
+    Note over Container,Cache: 1. 一级查无、二三级查无 A<br/>2. 标记 A 正在创建<br/>(singletonsCurrentlyInCreation)<br/>3. 实例化 A（new 出裸对象，未代理）<br/>4. 把 A 的 ObjectFactory 入三级缓存<br/>singletonFactories.put("A", lambda)
+    
+    Container->>Container: populateBean(A)<br/>发现依赖 B，递归调用
+    Container->>Container: getBean("B")
+    Note over Container,Cache: 5. 一级查无 B、二三级查无 B<br/>6. 标记 B 正在创建<br/>7. 实例化 B（裸对象）<br/>8. B 的 ObjectFactory 入三级缓存
+
+    Container->>Container: populateBean(B)<br/>发现依赖 A，递归调用
+    Container->>Container: getBean("A")
+    Note over Container,Cache: 9. 一级/二级查无 A<br/>从三级缓存取 A 的 ObjectFactory<br/>执行 getObject()<br/>→ 触发 getEarlyBeanReference()<br/>⭐ 生成 A 的代理对象<br/>10. 代理 A 放入二级缓存<br/>三级缓存删除 A
+
+    Container-->>Container: 返回代理 A
+    Note over Container: B 拿到代理 A<br/>完成属性填充
+    Note over Container: B 完成初始化
+    Note over Container,Cache: 11. B 进入一级缓存<br/>删除 B 的二三级缓存
+    Container-->>Container: 返回 B
+    
+    Note left of Container: A 拿到 B<br/>完成属性填充
+    Note left of Container: A 完成初始化<br/>(postProcessAfterInitialization<br/>检测 wrappedBean 已存在<br/>复用已生成的代理 A)
+    Note over Container,Cache: 12. A 进入一级缓存（代理A）<br/>删除 A 的二三级缓存
+    Container-->>Caller: 返回代理 A
 ```
 
 **关键点说明**：

@@ -103,10 +103,12 @@ ES 用 **JSON 描述查询**，叫 Query DSL。两大查询上下文是调优的
 
 ### 3.2 为什么 from+size 深翻页慢
 
-```
-查 from=10000, size=10
-  协调节点要每个分片都返回 10010 条（from+size），合并排序后只取 10 条。
-  分片数 × 10010 条在协调节点排序，内存和 CPU 爆炸。
+```mermaid
+graph TD
+    A["查 from=10000, size=10"]
+    --> B["协调节点要每个分片都返回 10010 条（from+size）"]
+    --> C["合并排序后只取 10 条"]
+    --> D["分片数 × 10010 条在协调节点排序<br/>内存和 CPU 爆炸"]
 ```
 
 - 所以默认 `max_result_window = 10000`，超过直接报错。
@@ -221,13 +223,16 @@ ES 用 **JSON 描述查询**，叫 Query DSL。两大查询上下文是调优的
 
 创建/删除索引、改 mapping、分片分配等，都被封装成 **`ClusterStateUpdateTask`** 提交到 Master 节点的任务队列：
 
-```
-创建索引请求 -> 协调节点转发给 Master -> 封装成 ClusterStateUpdateTask -> 入队
-   -> clusterApplierThread 串行执行：
-       a. task.execute()  计算出新 cluster state
-       b. 两阶段 publish 新状态到所有节点（先确认收到，再 commit）
-       c. apply 新状态
-   -> 各数据节点并行初始化分片（这一步才真正落地，不在 Master 线程上）
+```mermaid
+graph TD
+    A["创建索引请求"]
+    --> B["协调节点转发给 Master"]
+    --> C["封装成 ClusterStateUpdateTask → 入队"]
+    --> D["clusterApplierThread 串行执行"]
+    --> E["a. task.execute()<br/>计算出新 cluster state"]
+    --> F["b. 两阶段 publish 新状态到所有节点<br/>先确认收到，再 commit"]
+    --> G["c. apply 新状态"]
+    --> H["各数据节点并行初始化分片<br/>这一步才真正落地，不在 Master 线程上"]
 ```
 
 队列三个关键特性：
@@ -298,10 +303,19 @@ ES 用 **JSON 描述查询**，叫 Query DSL。两大查询上下文是调优的
 
 一个 ES 文档落盘的磁盘占用 ≈：
 
-```
-_source(1x) + 倒排(2~4x，每个索引字段各一份) + doc_values(0.5~1x)
-+ merge重写(2~3x) + translog(0.1~0.5x) + replica(1x)
-≈ 5~10x（字段多、索引多的 APM 场景偏 10x）
+```mermaid
+graph LR
+    subgraph 写放大组成
+        direction TB
+        S1["_source (1x)"]
+        S2["倒排 (2~4x，每个索引字段各一份)"]
+        S3["doc_values (0.5~1x)"]
+        S4["merge 重写 (2~3x)"]
+        S5["translog (0.1~0.5x)"]
+        S6["replica (1x)"]
+    end
+
+    Total["≈ 5~10x（字段多、索引多的 APM 场景偏 10x）"]
 ```
 
 - **两层放大**：① 同一数据存成多种结构（_source/倒排/doc_values/BKD）；② Lucene segment merge 重写。

@@ -58,28 +58,34 @@ Angel → Brixton → Camden → Dalston → Edgware → Finchley
 
 #### 1.4 核心组件全景
 
-```
-                ┌─────────────────────────────────────────┐
-                │         SpringCloud 微服务治理           │
-                └─────────────────────────────────────────┘
-                                  │
-   ┌──────────────┬───────────────┼───────────────┬──────────────┐
-   │              │               │               │              │
-注册发现      配置中心         服务调用        熔断限流        API网关
-   │              │               │               │              │
-Eureka        Config           OpenFeign       Hystrix         Zuul
-Nacos         Nacos            Dubbo          Sentinel     SpringCloud
-Consul        Apollo           RestTemplate   Resilience4j    Gateway
-Zookeeper     Spring Cloud                    (替代Hystrix)
-              Config
-                                  │
-                          ┌───────┴────────┐
-                          │                │
-                       链路追踪        分布式事务
-                          │                │
-                    Sleuth/Zipkin       Seata
-                    Micrometer          (Alibaba)
-                    Tracing
+```mermaid
+mindmap
+  root((SpringCloud<br/>微服务治理))
+    注册发现
+      Eureka
+      Nacos
+      Consul
+      Zookeeper
+    配置中心
+      Config(Spring Cloud)
+      Nacos
+      Apollo
+    服务调用
+      OpenFeign
+      Dubbo
+      RestTemplate
+    熔断限流
+      Hystrix(已停更)
+      Sentinel
+      Resilience4j(替代 Hystrix)
+    API网关
+      Zuul(已停更)
+      Spring Cloud Gateway
+    链路追踪
+      Sleuth/Zipkin
+      Micrometer Tracing
+    分布式事务
+      Seata(Alibaba)
 ```
 
 ---
@@ -134,17 +140,18 @@ Zookeeper     Spring Cloud                    (替代Hystrix)
 
 打个比方：注册中心 = 黄页/通讯录。每个服务开机就去黄页登记自己，调用方查黄页找到对方，黄页定期检查谁失联了就划掉。
 
-```
-   Provider                Registry               Consumer
-      │                       │                      │
-      │── 1. 注册 ──────────>│                      │
-      │── 2. 心跳续约 ──────>│                      │
-      │                       │<── 3. 拉取注册表 ────│
-      │                       │   (或被推送变更)     │
-      │<── 4. 调用 ─────────────────────────────────│
-      │                       │                      │
-      │  X 宕机，心跳停发      │                      │
-      │                       │── 5. 剔除实例 ────>│  (推送或下次拉取感知)
+```mermaid
+sequenceDiagram
+    participant P as Provider
+    participant R as Registry
+    participant C as Consumer
+
+    P->>R: 1. 注册
+    P->>R: 2. 心跳续约
+    C->>R: 3. 拉取注册表（或被推送变更）
+    C->>P: 4. 调用
+    Note over P: X 宕机，心跳停发
+    R->>C: 5. 剔除实例（推送或下次拉取感知）
 ```
 
 #### 3.2 Eureka（AP 模型）
@@ -284,21 +291,13 @@ public class OrderService {
 
 `@LoadBalanced` 本质是一个 `@Qualifier`，给 RestTemplate 注入一个拦截器 `LoadBalancerInterceptor`：
 
-```
-RestTemplate 调用
-   │
-   ▼
-LoadBalancerInterceptor.intercept()
-   │
-   ├─ 1. 解析 URL：http://user-service/users/1
-   │      → 提取服务名 user-service
-   │
-   ├─ 2. 调用 LoadBalancerClient.choose("user-service")
-   │      → 负载均衡选一个实例，比如 192.168.1.10:8081
-   │
-   ├─ 3. 替换 URL：http://192.168.1.10:8081/users/1
-   │
-   └─ 4. 转发给真正的 HTTP 客户端执行
+```mermaid
+graph TD
+    R["RestTemplate 调用"] --> LI["LoadBalancerInterceptor.intercept()"]
+    LI --> S1["1. 解析 URL：http://user-service/users/1<br/>→ 提取服务名 user-service"]
+    S1 --> S2["2. 调用 LoadBalancerClient.choose(\"user-service\")<br/>→ 负载均衡选一个实例，如 192.168.1.10:8081"]
+    S2 --> S3["3. 替换 URL：http://192.168.1.10:8081/users/1"]
+    S3 --> S4["4. 转发给真正的 HTTP 客户端执行"]
 ```
 
 2020.0+ 版本后，`LoadBalancerInterceptor` 默认走 **Spring Cloud LoadBalancer**（不是 Ribbon）。
@@ -345,43 +344,18 @@ public class OrderApplication { }
 
 ##### 工作原理 ⭐⭐⭐
 
-```
-@EnableFeignClients
-   │
-   ├─ 1. @Import(FeignClientsRegistrar.class)
-   │
-   ▼
-FeignClientsRegistrar.registerFeignClients()
-   │  扫描 @FeignClient 注解的接口
-   │  为每个接口注册一个 FeignClientFactoryBean 到容器
-   │
-   ▼
-FeignClientFactoryBean.getObject()
-   │  FactoryBean 模式，getObject() 返回代理对象
-   │
-   ▼
-Reflective.Feign.newInstance()
-   │  JDK 动态代理生成接口的实现类
-   │  方法处理器：SynchronousMethodHandler
-   │
-   ▼
-调用 userClient.getById(1L)
-   │
-   ▼
-SynchronousMethodHandler.invoke()
-   │
-   ├─ 1. 解析方法上的注解（@GetMapping/@PathVariable/@RequestBody）
-   │      → 用 Contract（默认 SpringMvcContract）解析出 RequestTemplate
-   │
-   ├─ 2. 模板渲染：把参数填进 URL/Body
-   │      GET /users/{id} → GET /users/1
-   │
-   ├─ 3. 集成负载均衡：服务名 user-service 解析为具体 IP:Port
-   │      Feign.Builder 默认用 Spring Cloud LoadBalancer 选实例
-   │
-   ├─ 4. HttpClient 发起 HTTP 请求
-   │
-   └─ 5. Decoder 解码响应 → 返回 User 对象
+```mermaid
+graph TD
+    S1["@EnableFeignClients<br/>@Import(FeignClientsRegistrar.class)"] --> S2["FeignClientsRegistrar.registerFeignClients()<br/>扫描 @FeignClient 注解的接口<br/>为每个接口注册 FeignClientFactoryBean"]
+    S2 --> S3["FeignClientFactoryBean.getObject()<br/>FactoryBean 模式，返回代理对象"]
+    S3 --> S4["ReflectiveFeign.newInstance()<br/>JDK 动态代理生成接口实现类<br/>方法处理器：SynchronousMethodHandler"]
+    S4 --> S5["调用 userClient.getById(1L)"]
+    S5 --> S6["SynchronousMethodHandler.invoke()"]
+    S6 --> S6a["1. 解析方法注解<br/>@GetMapping/@PathVariable/@RequestBody<br/>→ Contract 解析出 RequestTemplate"]
+    S6 --> S6b["2. 模板渲染<br/>把参数填进 URL/Body<br/>GET /users/{id} → GET /users/1"]
+    S6 --> S6c["3. 集成负载均衡<br/>服务名 user-service 解析为具体 IP:Port<br/>默认 Spring Cloud LoadBalancer 选实例"]
+    S6 --> S6d["4. HttpClient 发起 HTTP 请求"]
+    S6 --> S6e["5. Decoder 解码响应 → 返回 User 对象"]
 ```
 
 关键点：
@@ -424,15 +398,22 @@ SynchronousMethodHandler.invoke()
 - 客户端 LB = 你自己翻通讯录挑人打电话。
 - 服务端 LB = 你打给前台，前台帮你转接。
 
-```
-客户端负载均衡：
-   Consumer ─┐
-             ├─ (本地选实例) ──> Provider1
-             │                ├─> Provider2
-             └─ 直接发请求 ───┴─> Provider3
+```mermaid
+graph LR
+    subgraph client_lb["客户端负载均衡"]
+        C["Consumer"]
+        P1["Provider1"]
+        P2["Provider2"]
+        P3["Provider3"]
+        C -->|"本地选实例<br/>直接发请求"| P1
+        C --> P2
+        C --> P3
+    end
 
-服务端负载均衡：
-   Consumer ──> Nginx ──> (选实例) ──> Provider1/2/3
+    subgraph server_lb["服务端负载均衡"]
+        C2["Consumer"] --> N["Nginx"]
+        N -->|"选实例"| Px["Provider1/2/3"]
+    end
 ```
 
 > 实际生产中**两者常配合使用**：外网入口用 Nginx 做流量分发和 SSL 卸载，内部服务间调用用 LoadBalancer。Nginx 不直接参与服务间调用（除非做网关）。

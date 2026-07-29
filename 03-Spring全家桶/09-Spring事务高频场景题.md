@@ -27,12 +27,14 @@ public class OrderService {
 
 ### 会出现的问题（按严重程度）
 
-```
-事务开启 ─────────────────────────────────────────────── 事务提交/回滚
-  │ ① insert                                                    ③ update │
-  │                ② payClient.pay() 超时 30s（卡在 socket read）         │
-  │                                                                         │
-  │   整个 30s 内：Connection 被占用不释放、行锁不释放、超时后回滚        │
+```mermaid
+timeline
+    title 事务时间线
+    事务开启 : ① insert 写入 DB
+             : ② payClient.pay() 超时 30s（卡在 socket read）
+             : 整个 30s 内 Connection 被占用不释放、行锁不释放
+    事务提交/回滚 : ③ update 更新状态
+                  : 超时后回滚
 ```
 
 **1. 长事务（核心问题）** ⭐⭐⭐⭐⭐

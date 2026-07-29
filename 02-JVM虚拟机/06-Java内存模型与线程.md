@@ -65,19 +65,37 @@ JMM规定了：
 
 **结构图：**
 
-```
-                    ┌──────────────────────────────────┐
-                    │          主内存（共享）            │
-                    │  变量A  变量B  变量C  变量D       │
-                    └───┬──────────┬───────────┬───────┘
-                        │          │           │
-         拷贝到工作内存 │          │           │
-                        ▼          ▼           ▼
-              ┌───────────┐ ┌───────────┐ ┌───────────┐
-              │ 线程1工作  │ │ 线程2工作  │ │ 线程3工作  │
-              │ 内存（私有）│ │ 内存（私有）│ │ 内存（私有）│
-              │ 变量A副本  │ │ 变量B副本  │ │ 变量C副本  │
-              └───────────┘ └───────────┘ └───────────┘
+```mermaid
+graph TB
+    subgraph MainMem["主内存（所有线程共享）"]
+        direction LR
+        VarA["变量 A"]
+        VarB["变量 B"]
+        VarC["变量 C"]
+        VarD["变量 D"]
+    end
+
+    subgraph WorkMems["工作内存（每个线程私有）"]
+        direction LR
+        subgraph T1["线程 1 工作内存"]
+            W1["变量 A 副本"]
+        end
+        subgraph T2["线程 2 工作内存"]
+            W2["变量 B 副本"]
+        end
+        subgraph T3["线程 3 工作内存"]
+            W3["变量 C 副本"]
+        end
+    end
+
+    VarA -.->|"拷贝"| W1
+    VarB -.->|"拷贝"| W2
+    VarC -.->|"拷贝"| W3
+
+    style MainMem fill:#fff3e0,stroke:#e65100
+    style T1 fill:#e3f2fd,stroke:#1565c0
+    style T2 fill:#e3f2fd,stroke:#1565c0
+    style T3 fill:#e3f2fd,stroke:#1565c0
 ```
 
 **回到开头的例子，为什么循环不会结束？**
@@ -109,13 +127,33 @@ JMM定义了8种原子操作来完成"主内存 ↔ 工作内存"的交互：
 
 **完整流程示例：** 线程把变量`a`从1改成2
 
-```
-1. read   ：主内存 a=1 → 读出来，准备传输
-2. load   ：放到工作内存 a=1
-3. use    ：交给执行引擎计算
-4. assign ：计算结果a=2，赋值回工作内存
-5. store  ：工作内存 a=2 → 传出去，准备写回
-6. write  ：写回主内存 a=2
+```mermaid
+graph LR
+    subgraph Main["主内存"]
+        M1["a = 1"]
+        M2["a = 2"]
+    end
+
+    subgraph Work["工作内存"]
+        direction TB
+        W1["a = 1（load 后）"]
+        W2["a = 2（assign 后）"]
+    end
+
+    subgraph Engine["执行引擎"]
+        E["计算 a + 1 = 2"]
+    end
+
+    M1 -->|"1. read"| W1
+    W1 -->|"2. load"| W1
+    W1 -->|"3. use"| E
+    E -->|"4. assign"| W2
+    W2 -->|"5. store"| M2
+    M2 -->|"6. write"| M2
+
+    style Main fill:#fff3e0,stroke:#e65100
+    style Work fill:#e3f2fd,stroke:#1565c0
+    style Engine fill:#f3e5f5,stroke:#6a1b9a
 ```
 
 **重要规则（理解就行，不用死记）：**
@@ -389,37 +427,22 @@ public void reader() {
 
 #### 2. 状态转换图（核心！）
 
-```
-      new Thread()
-           ↓
-         [NEW]
-           ↓  start()
-         [RUNNABLE] ←──────────┐
-           /   \                │  拿到锁
-  CPU时间片完   拿到锁           │
-          │       │             │
-          │   [BLOCKED]  抢锁失败
-          │       │             │
-          │       └─────────────┘
-          │
-          │  wait()/join()/park()
-          ↓
-       [WAITING] ←──────────────┐
-          │                     │
-          │  notify()/          │
-          │  LockSupport.unpark()│
-          └─────────────────────┘
-          │
-          │  sleep(time)/wait(time)
-          ↓
-    [TIMED_WAITING] ←──────────┐
-          │                     │
-          │  超时了 / 被唤醒     │
-          └─────────────────────┘
-          │
-          │  执行完 / 异常退出
-          ↓
-      [TERMINATED]
+```mermaid
+stateDiagram-v2
+    [*] --> NEW: new Thread()
+    NEW --> RUNNABLE: start()
+
+    RUNNABLE --> BLOCKED: 抢锁失败
+    BLOCKED --> RUNNABLE: 拿到锁
+
+    RUNNABLE --> WAITING: wait() / join() / park()
+    WAITING --> RUNNABLE: notify() / notifyAll() / unpark()
+
+    RUNNABLE --> TIMED_WAITING: sleep(time) / wait(time) / parkNanos()
+    TIMED_WAITING --> RUNNABLE: 超时 / 被唤醒
+
+    RUNNABLE --> TERMINATED: 执行完 / 异常退出
+    TERMINATED --> [*]
 ```
 
 **面试常考：BLOCKED vs WAITING 的区别？**

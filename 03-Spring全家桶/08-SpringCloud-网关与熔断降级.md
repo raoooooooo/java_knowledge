@@ -131,41 +131,18 @@ public class AuthFilter implements GlobalFilter, Ordered {
 
 **完整请求处理流程**
 
-```text
-   客户端请求
-       │
-       ▼
-┌──────────────────────────┐
-│  Gateway Handler Mapping │ ◀── 用 Predicate 匹配 Route
-│  （路由匹配器）            │
-└────────────┬─────────────┘
-             │ 匹配成功
-             ▼
-┌──────────────────────────┐
-│  Gateway Web Handler      │ ◀── 拿到匹配的 Route
-│  （Web 处理器）            │
-└────────────┬─────────────┘
-             │ 取出 Filter Chain
-             ▼
-┌──────────────────────────┐
-│  Filter Chain (pre)       │ ◀── 前置过滤器：鉴权、改请求、限流
-│  前置过滤链                │
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────────────────────┐
-│  Proxy via Netty          │ ◀── 用 HttpClient（非阻塞）转发到后端
-│  HttpClient 转发后端服务    │
-└────────────┬─────────────┘
-             │ 后端响应
-             ▼
-┌──────────────────────────┐
-│  Filter Chain (post)      │ ◀── 后置过滤器：改响应、记录日志
-│  后置过滤链                │
-└────────────┬─────────────┘
-             │
-             ▼
-        返回客户端
+```mermaid
+graph TD
+    CLIENT["客户端请求"] --> GHM["Gateway Handler Mapping<br/>路由匹配器<br/>◀ 用 Predicate 匹配 Route"]
+    GHM -->|"匹配成功"| GWH["Gateway Web Handler<br/>Web 处理器<br/>◀ 拿到匹配的 Route"]
+    GWH -->|"取出 Filter Chain"| PRE["Filter Chain (pre)<br/>前置过滤链<br/>◀ 鉴权、改请求、限流"]
+    PRE --> PROXY["Proxy via Netty<br/>HttpClient 转发后端服务<br/>◀ 用 HttpClient（非阻塞）转发到后端"]
+    PROXY -->|"后端响应"| POST["Filter Chain (post)<br/>后置过滤链<br/>◀ 改响应、记录日志"]
+    POST --> RESP["返回客户端"]
+
+    style GHM fill:#e3f2fd
+    style PRE fill:#fff3e0
+    style POST fill:#e8f5e9
 ```
 
 **关键点**
@@ -194,21 +171,14 @@ public class AuthFilter implements GlobalFilter, Ordered {
 
 **生产实践：双层网关**
 
-```text
-   用户
-    │
-    ▼
-┌─────────┐   静态资源、SSL卸载、四层负载、超高并发入口
-│ Nginx   │   （外层：性能担当）
-└────┬────┘
-     │
-     ▼
-┌─────────┐   业务鉴权、动态路由、熔断限流、链路追踪打标
-│ Gateway │   （内层：业务担当）
-└────┬────┘
-     │
-     ▼
-  微服务集群
+```mermaid
+graph TD
+    U["用户"] --> N["Nginx<br/>外层：性能担当<br/>静态资源、SSL卸载、四层负载、超高并发入口"]
+    N --> G["Spring Cloud Gateway<br/>内层：业务担当<br/>业务鉴权、动态路由、熔断限流、链路追踪打标"]
+    G --> M["微服务集群"]
+
+    style N fill:#e3f2fd
+    style G fill:#fff3e0
 ```
 
 > **类比理解**：Nginx = 大厦外面的保安亭（拦截大量访客、分流、安检）；Gateway = 大厦里面的前台（登记、带路、登记具体业务）。两者分工不同，常配合使用。
@@ -221,18 +191,19 @@ public class AuthFilter implements GlobalFilter, Ordered {
 
 微服务间调用是链式的，一个服务出问题会级联拖垮整条链路：
 
-```text
-用户 -> 服务A -> 服务B -> 服务C
-                    │
-                    └─ C 挂了/慢了
-                       │
-                       └─ B 调 C 一直等待，线程被占住
-                          │
-                          └─ B 的线程池耗尽，B 也无法响应
-                             │
-                             └─ A 调 B 也卡住，A 线程池耗尽
-                                │
-                                └─ 整条链路宕机 = 雪崩
+```mermaid
+graph LR
+    USER["用户"] --> A["服务 A"]
+    A --> B["服务 B"]
+    B --> C["服务 C"]
+
+    C --> C1["C 挂了/慢了"]
+    C1 --> B1["B 调 C 一直等待，线程被占住"]
+    B1 --> B2["B 的线程池耗尽，B 也无法响应"]
+    B2 --> A1["A 调 B 也卡住，A 线程池耗尽"]
+    A1 --> AV["整条链路宕机 = 雪崩"]
+
+    style AV fill:#ffebee,stroke:#c62828,stroke-width:2px
 ```
 
 **类比理解**：电路里一个插座短路，如果不跳闸，电流会一直增大把整个电路烧毁。保险丝（熔断器）就是在电流异常时主动断开，保护整个电路。
@@ -253,31 +224,23 @@ public class AuthFilter implements GlobalFilter, Ordered {
 
 **三状态及转换**
 
-```text
-                    失败率/慢调用率达阈值
-        ┌──────────────────────────────┐
-        │                              │
-        ▼                              │
-┌───────────────┐                ┌───────────────┐
-│   CLOSED      │                │    OPEN       │
-│  （关闭）      │ ◀──────────── │   （打开）     │
-│ 正常放行请求   │  半开探测成功  │ 直接拒绝/降级  │
-│ 统计失败率     │                │ 等待冷却时间   │
-└───────┬───────┘                └───────┬───────┘
-        │                                │
-        │          等待冷却时间到          │
-        │  （比如 10 秒后进入半开）        │
-        │                                ▼
-        │                         ┌───────────────┐
-        │                         │  HALF_OPEN    │
-        │                         │  （半开）      │
-        │                         │ 放少量请求探测  │
-        │                         └───┬───────┬───┘
-        │                             │       │
-        │                     探测成功 │       │ 探测失败
-        └─────────────────────────────┘       │
-                                              ▼
-                                         回到 OPEN
+```mermaid
+stateDiagram-v2
+    [*] --> CLOSED
+
+    CLOSED: CLOSED（关闭）
+    CLOSED: 正常放行请求，统计失败率
+
+    OPEN: OPEN（打开）
+    OPEN: 直接拒绝/降级，等待冷却时间
+
+    HALF_OPEN: HALF_OPEN（半开）
+    HALF_OPEN: 放少量请求探测
+
+    CLOSED --> OPEN: 失败率/慢调用率达阈值
+    OPEN --> HALF_OPEN: 等待冷却时间到（如 10 秒）
+    HALF_OPEN --> CLOSED: 探测成功
+    HALF_OPEN --> OPEN: 探测失败
 ```
 
 **三状态详解**
@@ -340,13 +303,24 @@ resilience4j:
 
 #### 1. 计数器（固定窗口）
 
-```text
-窗口1（0-1s）         窗口2（1-2s）        窗口3（2-3s）
-┌────────────┐      ┌────────────┐      ┌────────────┐
-│  ▲▲▲▲▲     │      │  ▲▲▲       │      │  ▲▲▲▲▲▲   │
-│  阈值=5    │      │  阈值=5    │      │  阈值=5    │
-└────────────┘      └────────────┘      └────────────┘
-0s              1s              2s              3s
+```mermaid
+graph LR
+    subgraph W1["窗口 1（0-1s）"]
+        direction TB
+        A1["▲▲▲▲▲"]
+        T1["阈值 = 5"]
+    end
+    subgraph W2["窗口 2（1-2s）"]
+        direction TB
+        A2["▲▲▲"]
+        T2["阈值 = 5"]
+    end
+    subgraph W3["窗口 3（2-3s）"]
+        direction TB
+        A3["▲▲▲▲▲▲"]
+        T3["阈值 = 5"]
+    end
+    W1 --- W2 --- W3
 ```
 
 - **原理**：每个时间窗口内计数，超过阈值就拒绝。
@@ -355,14 +329,17 @@ resilience4j:
 
 #### 2. 滑动窗口（解决临界突刺）
 
-```text
-   当前时刻
-     │
-     ▼
-  ┌──┴──┬──┬──┬──┐
-  │格子1 │格子2│格子3│格子4│   滑动窗口统计最近 N 个格子
-  └──────┴──┴──┴──┘
-  t-3s  t-2s t-1s  t
+```mermaid
+graph LR
+    NOW["当前时刻 ↓"]
+    subgraph SW["滑动窗口（统计最近 N 个格子）"]
+        G1["格子 1"]
+        G2["格子 2"]
+        G3["格子 3"]
+        G4["格子 4"]
+        G1 --- G2 --- G3 --- G4
+    end
+    L1["t-3s"] --- L2["t-2s"] --- L3["t-1s"] --- L4["t"]
 ```
 
 - **原理**：把时间切成更小的格子，统计**滑动覆盖的最近 N 个格子**的总数。
@@ -371,17 +348,11 @@ resilience4j:
 
 #### 3. 令牌桶（Token Bucket）
 
-```text
-        以固定速率 r 产生令牌
-              │
-              ▼
-         ┌─────────┐
-         │ 令牌桶  │  ◀── 桶满则丢弃新令牌
-         │容量 C   │
-         └────┬────┘
-              │ 取到令牌
-              ▼
-         请求通过 ────► 没令牌则拒绝/排队
+```mermaid
+graph TD
+    GEN["以固定速率 r 产生令牌"] --> BUCKET["令牌桶<br/>容量 C<br/>◀ 桶满则丢弃新令牌"]
+    BUCKET -->|"取到令牌"| PASS["请求通过"]
+    BUCKET -->|"没令牌"| REJ["拒绝 / 排队"]
 ```
 
 - **原理**：系统以固定速率往桶里放令牌，桶有最大容量；请求来时拿一个令牌，拿不到就拒绝。
@@ -390,17 +361,10 @@ resilience4j:
 
 #### 4. 漏桶（Leaky Bucket）
 
-```text
-   请求（任意速率）
-     │  │  │
-     ▼  ▼  ▼
-   ┌─────────┐
-   │  漏桶   │  ◀── 桶满则拒绝新请求
-   │         │
-   └────┬────┘
-        │ 匀速漏出（固定速率 r）
-        ▼
-    后端处理
+```mermaid
+graph TD
+    REQ["请求（任意速率）<br/>│ │ │<br/>▼ ▼ ▼"] --> BUCKET["漏桶<br/>◀ 桶满则拒绝新请求"]
+    BUCKET -->|"匀速漏出（固定速率 r）"| PROC["后端处理"]
 ```
 
 - **原理**：请求进桶，桶以**固定速率**漏出处理，超出桶容量则拒绝。
@@ -502,19 +466,21 @@ resilience4j:
 
 **Nacos 长轮询原理（重点）**
 
-```text
-Client ──── HTTP 请求（带配置 MD5）───► Nacos Server
-                                      │
-                       配置没变？挂住请求（不立即返回）
-                       最长 30s 超时
-                                      │
-            ┌──────────────┬──────────┴──────────┐
-            │              │                     │
-       超时返回        配置变了                立即返回
-       （配置未变）    （MD5 不匹配）          新配置
-            │              │
-            ▼              ▼
-       再次发起长轮询    收到变更，刷新本地配置
+```mermaid
+sequenceDiagram
+    participant Client
+    participant NS as Nacos Server
+
+    Client->>NS: HTTP 请求（带配置 MD5）
+    Note over NS: 配置没变？挂住请求（不立即返回）<br/>最长 30s 超时
+
+    alt 超时返回（配置未变）
+        NS-->>Client: 超时空响应
+        Client->>NS: 再次发起长轮询
+    else 配置变更（MD5 不匹配）
+        NS-->>Client: 立即返回新配置
+        Note left of Client: 收到变更，刷新本地配置
+    end
 ```
 
 - 客户端把本地配置的 MD5 一起发给 Nacos
@@ -545,16 +511,18 @@ Client ──── HTTP 请求（带配置 MD5）───► Nacos Server
 
 **三大角色**
 
-```text
-   TM（事务管理器）          ◀── 开启全局事务，决策提交/回滚
-       │
-       │  开启/提交/回滚全局事务
-       ▼
-   TC（事务协调器）          ◀── Seata Server，维护全局事务状态
-       │
-       │  分支事务注册/上报状态
-       ▼
-   RM（资源管理器）          ◀── 每个微服务里的本地数据库代理
+```mermaid
+graph TD
+    TM["TM（事务管理器）<br/>◀ 开启全局事务，决策提交/回滚"]
+    TC["TC（事务协调器）<br/>◀ Seata Server，维护全局事务状态"]
+    RM["RM（资源管理器）<br/>◀ 每个微服务里的本地数据库代理"]
+
+    TM -->|"开启/提交/回滚全局事务"| TC
+    TC -->|"分支事务注册/上报状态"| RM
+
+    style TM fill:#e3f2fd
+    style TC fill:#fff3e0
+    style RM fill:#e8f5e9
 ```
 
 - **TC**：独立部署的 Seata Server，全局事务的大管家
@@ -577,16 +545,18 @@ Client ──── HTTP 请求（带配置 MD5）───► Nacos Server
 
 **一次调用的 Trace/Span 关系**
 
-```text
-Trace (TraceId=abc)
-  │
-  ├─ Span1: Gateway  (SpanId=s1, parent=null)
-  │    │
-  │    ├─ Span2: Service-A  (SpanId=s2, parent=s1)
-  │    │    │
-  │    │    └─ Span3: Service-B  (SpanId=s3, parent=s2)
-  │    │
-  │    └─ Span4: Service-C  (SpanId=s4, parent=s1)
+```mermaid
+graph TD
+    Trace["Trace (TraceId=abc)"]
+    S1["Span1: Gateway<br/>SpanId=s1, parent=null"]
+    S2["Span2: Service-A<br/>SpanId=s2, parent=s1"]
+    S3["Span3: Service-B<br/>SpanId=s3, parent=s2"]
+    S4["Span4: Service-C<br/>SpanId=s4, parent=s1"]
+
+    Trace --> S1
+    S1 --> S2
+    S2 --> S3
+    S1 --> S4
 ```
 
 每个 Span 记录起止时间、服务名、方法、标签等，串联起来就是完整调用链。

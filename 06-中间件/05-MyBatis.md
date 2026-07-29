@@ -88,45 +88,41 @@ User u = userMapper.selectById(1L);
 
 #### 2.1 核心组件总览（架构图）
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      应用代码 / Mapper 接口                       │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ JDK 动态代理 MapperProxy
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                         SqlSession                              │
-│  （一次 DB 会话：执行 SQL、获取 Mapper、管理事务；非线程安全）        │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ 委派
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                          Executor                                │
-│       （执行器：SQL 生成、一级/二级缓存维护、事务管理）              │
-│   ┌───────────┬───────────┬─────────────┐                        │
-│   │  Simple   │   Reuse   │   Batch     │   三种实现              │
-│   └───────────┴───────────┴─────────────┘                        │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ 调用
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    StatementHandler                              │
-│   （处理 JDBC Statement：创建、参数化、执行）                       │
-│   ┌──────────────────┬─────────────────────┬─────────────────┐   │
-│   │ SimpleStatement  │ PreparedStatement    │ CallableStatement│  │
-│   │ (普通 Statement) │ (预编译,默认,防注入)  │ (存储过程)         │   │
-│   └──────────────────┴─────────────────────┴─────────────────┘   │
-└──┬───────────────────────────────────────┬──────────────────────┘
-   ▼                                       ▼
-┌────────────────────┐            ┌─────────────────────┐
-│ ParameterHandler   │            │  ResultSetHandler    │
-│ (设置 ? 占位符参数)  │            │ (结果集→Java对象映射)  │
-└────────────────────┘            └─────────────────────┘
-                               │
-                               ▼
-                      ┌────────────────┐
-                      │  JDBC Database  │
-                      └────────────────┘
+```mermaid
+graph TB
+    App[应用代码 / Mapper 接口]
+    SqlSession[SqlSession<br/>一次 DB 会话：执行 SQL、获取 Mapper、管理事务<br/>非线程安全]
+    subgraph ExecutorLayer["Executor 执行器"]
+        direction TB
+        ExecutorDesc[SQL 生成、一级/二级缓存维护、事务管理]
+        subgraph ExecutorImpls["三种实现"]
+            direction LR
+            Simple[SimpleExecutor]
+            Reuse[ReuseExecutor]
+            Batch[BatchExecutor]
+        end
+    end
+    subgraph StatementHandlerLayer["StatementHandler"]
+        direction TB
+        SHDesc[处理 JDBC Statement：创建、参数化、执行]
+        subgraph SHImpls["三种实现"]
+            direction LR
+            SimpleStmt[SimpleStatement<br/>普通 Statement]
+            PreparedStmt[PreparedStatement<br/>预编译,默认,防注入]
+            CallableStmt[CallableStatement<br/>存储过程]
+        end
+    end
+    PH[ParameterHandler<br/>设置 ? 占位符参数]
+    RH[ResultSetHandler<br/>结果集→Java对象映射]
+    DB[JDBC Database]
+
+    App -->|JDK 动态代理 MapperProxy| SqlSession
+    SqlSession -->|委派| ExecutorLayer
+    ExecutorLayer -->|调用| StatementHandlerLayer
+    StatementHandlerLayer --> PH
+    StatementHandlerLayer --> RH
+    PH --> DB
+    RH --> DB
 ```
 
 #### 2.2 各组件职责速记
@@ -227,40 +223,25 @@ User u = mapper.selectById(1L);
 
 #### 3.2 绑定流程（图）
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  阶段一：启动期（解析配置）                                            │
-│  ─────────────────────────────────────────────────────────────       │
-│  ① 解析 mybatis-config.xml 中的 <mappers>，或 @MapperScan 扫描包        │
-│  ② 解析 UserMapper.xml：                                              │
-│       <mapper namespace="com.example.UserMapper">                   │
-│         <select id="selectById" resultType="User">...</select>       │
-│       </mapper>                                                      │
-│  ③ 注册到 Configuration：                                            │
-│       key = namespace + "." + id                                    │
-│         = "com.example.UserMapper.selectById"                        │
-│       value = MappedStatement（封装这条 SQL 的一切元信息）              │
-│  ④ MapperRegistry.addMapper(UserMapper.class)：                      │
-│       为接口创建 MapperProxyFactory 并缓存                              │
-└─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Phase1["阶段一：启动期（解析配置）"]
+        direction TB
+        P1_S1["① 解析 mybatis-config.xml 中的 &lt;mappers&gt;<br/>或 @MapperScan 扫描包"]
+        P1_S2["② 解析 UserMapper.xml<br/>&lt;mapper namespace='com.example.UserMapper'&gt;<br/>&nbsp;&nbsp;&lt;select id='selectById' resultType='User'&gt;...&lt;/select&gt;<br/>&lt;/mapper&gt;"]
+        P1_S3["③ 注册到 Configuration<br/>key = namespace + '.' + id<br/>&nbsp;&nbsp;= 'com.example.UserMapper.selectById'<br/>value = MappedStatement（SQL 元信息）"]
+        P1_S4["④ MapperRegistry.addMapper(UserMapper.class)<br/>为接口创建 MapperProxyFactory 并缓存"]
+        P1_S1 --> P1_S2 --> P1_S3 --> P1_S4
+    end
 
-┌─────────────────────────────────────────────────────────────────────┐
-│  阶段二：运行期（调用接口）                                            │
-│  ─────────────────────────────────────────────────────────────       │
-│  ⑤ sqlSession.getMapper(UserMapper.class)                           │
-│       -> MapperRegistry.getMapper()                                 │
-│       -> MapperProxyFactory.newInstance(sqlSession)                 │
-│       -> Proxy.newProxyInstance(... , UserMapper.class, MapperProxy) │
-│       返回一个 JDK 动态代理对象（实现了 UserMapper）                       │
-│                                                                      │
-│  ⑥ 调用 mapper.selectById(1L)：                                      │
-│       -> MapperProxy.invoke()                                        │
-│       -> 方法名 "selectById" + 接口全限定名                            │
-│       -> 拼出 statementId = "com.example.UserMapper.selectById"     │
-│       -> 根据 statementId 找 MappedStatement                          │
-│       -> 委托 sqlSession.selectOne("...selectById", 1L)              │
-│       -> Executor 执行（见第二章时序图）                                 │
-└─────────────────────────────────────────────────────────────────────┘
+    subgraph Phase2["阶段二：运行期（调用接口）"]
+        direction TB
+        P2_S5["⑤ sqlSession.getMapper(UserMapper.class)<br/>→ MapperRegistry.getMapper()<br/>→ MapperProxyFactory.newInstance(sqlSession)<br/>→ Proxy.newProxyInstance(..., MapperProxy)<br/>返回 JDK 动态代理对象"]
+        P2_S6["⑥ 调用 mapper.selectById(1L)<br/>→ MapperProxy.invoke()<br/>→ 拼出 statementId<br/>→ 查找 MappedStatement<br/>→ 委托 sqlSession.selectOne()<br/>→ Executor 执行"]
+        P2_S5 --> P2_S6
+    end
+
+    Phase1 --> Phase2
 ```
 
 #### 3.3 接口与 XML 的绑定规则（最核心一句话）
@@ -538,32 +519,31 @@ SELECT * FROM user WHERE name = 'Tom' OR '1'='1'
 
 #### 6.1 缓存层级总览
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                       应用层调用                              │
-│                          │                                   │
-│                          ▼                                   │
-│   ┌────────────────────────────────────────────────────┐     │
-│   │              二级缓存（namespace 级，跨 SqlSession）  │     │
-│   │   ┌──────────────┐  ┌──────────────┐                │     │
-│   │   │ UserMapper   │  │ OrderMapper  │  ...           │     │
-│   │   │ namespace    │  │ namespace    │                │     │
-│   │   └──────────────┘  └──────────────┘                │     │
-│   │   ✗ 默认关闭，需 <cache/> 或 @CacheNamespace 显式开启  │     │
-│   │   ✗ 实体需实现 Serializable                          │     │
-│   └────────────────────────────────────────────────────┘     │
-│                          │ 未命中                            │
-│                          ▼                                   │
-│   ┌────────────────────────────────────────────────────┐     │
-│   │            一级缓存（SqlSession 级，HashMap）         │     │
-│   │   ✓ 默认开启                                        │     │
-│   │   ✗ SqlSession 关闭/提交即清空                       │     │
-│   │   ✗ Spring 集成下几乎失效（每次新 SqlSession）         │     │
-│   └────────────────────────────────────────────────────┘     │
-│                          │ 未命中                            │
-│                          ▼                                   │
-│                     查询数据库                                │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    App["应用层调用"]
+
+    subgraph L2["二级缓存（namespace 级，跨 SqlSession）"]
+        direction LR
+        L2_User["UserMapper namespace"]
+        L2_Order["OrderMapper namespace"]
+        L2_More["..."]
+    end
+
+    subgraph L1["一级缓存（SqlSession 级，HashMap）"]
+        L1_F1["✓ 默认开启"]
+        L1_F2["✗ SqlSession 关闭/提交即清空"]
+        L1_F3["✗ Spring 集成下几乎失效（每次新 SqlSession）"]
+    end
+
+    DB["查询数据库"]
+
+    App --> L2
+    L2 -->|未命中| L1
+    L1 -->|未命中| DB
+
+    L2_Note["✗ 默认关闭，需 &lt;cache/&gt; 或 @CacheNamespace 显式开启<br/>✗ 实体需实现 Serializable"]
+    L2 --- L2_Note
 ```
 
 **查询顺序**：二级缓存 → 一级缓存 → 数据库。
@@ -647,20 +627,24 @@ public class UserService {
 
 **多表查询的脏读问题（高频考点）**⭐⭐⭐
 
-```
-┌──────────────────────────┐      ┌──────────────────────────┐
-│   UserMapper namespace   │      │  OrderMapper namespace   │
-│   二级缓存：user 表数据     │      │   二级缓存：order 表数据    │
-└──────────────────────────┘      └──────────────────────────┘
-              ▲                              │
-              │  UserMapper.selectOrderJoin  │ OrderMapper.updateById
-              │  查询时把 order 信息也缓存了    │  更新 order 表
-              │                              │
-              │  ← 只清自己的二级缓存          │ → 只清 OrderMapper 缓存
-              │     UserMapper 缓存没动！      │   UserMapper 缓存不知道！
-              │                              │
-              └── 下次查 UserMapper 时，       │
-                  返回旧的 order 数据 ──> 脏读  │
+```mermaid
+graph LR
+    subgraph UserNS["UserMapper namespace"]
+        UserCache["二级缓存：user 表数据<br/>(含 JOIN 进来的 order 数据)"]
+    end
+
+    subgraph OrderNS["OrderMapper namespace"]
+        OrderCache["二级缓存：order 表数据"]
+    end
+
+    Query["UserMapper.selectOrderJoin<br/>查询时把 order 信息也缓存了"]
+    Update["OrderMapper.updateById<br/>更新 order 表"]
+    Dirty["下次查 UserMapper → 返回旧 order 数据<br/>脏读"]
+
+    Query -->|写入| UserCache
+    Update -->|只清自己| OrderCache
+    Update -.->|不知道!| UserCache
+    UserCache -->|返回旧数据| Dirty
 ```
 
 **问题本质**：二级缓存按 namespace 隔离，而多表 JOIN 查询时，A namespace 的缓存里包含了 B 表的数据。B 表更新时只会清 B 自己的 namespace 缓存，**A 不会感知，下次查 A 仍返回旧的 JOIN 结果 = 脏读**。
@@ -718,39 +702,43 @@ public class UserService {
 
 #### 7.3 拦截链结构图
 
-```
-   应用调用
-      │
-      ▼
-┌─────────────────────────────────────────────────────────┐
-│  目标对象（如 Executor）                                 │
-│  被 Configuration.newExecutor() 创建后立即被包装：        │
-│                                                          │
-│    Executor original = new SimpleExecutor(...)          │
-│    Executor wrapped = (Executor) interceptorChain      │
-│                         .pluginAll(original)            │
-│                                                          │
-│  pluginAll 内部：遍历所有 Interceptor，依次包装            │
-└─────────────────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────────────────┐
-│       InterceptorChain（责任链，按顺序）                   │
-│                                                          │
-│   target ──> Plugin1.wrap ──> Plugin2.wrap ──> Plugin3   │
-│                                                              │
-│              （形成多层代理，最外层是最后一个插件）              │
-└─────────────────────────────────────────────────────────┘
-      │
-      ▼
-   多层代理对象（Executor 的代理的代理的代理...）
-      │
-      ▼
-   每次方法调用都层层进入，每层可决定：
-     ① 放行（invokeArgs）
-     ② 改写参数
-     ③ 完全替换返回值
-     ④ 阻止调用
+```mermaid
+graph TB
+    App["应用调用"]
+
+    subgraph Target["目标对象创建与包装"]
+        direction TB
+        Original["Executor original<br/>= new SimpleExecutor(...)"]
+        Wrapped["Executor wrapped<br/>= interceptorChain.pluginAll(original)"]
+        Note["pluginAll 内部：遍历所有 Interceptor，依次包装"]
+        Original --> Wrapped
+        Wrapped --- Note
+    end
+
+    subgraph Chain["InterceptorChain 责任链（按顺序包装）"]
+        direction LR
+        T["target"]
+        P1["Plugin1.wrap"]
+        P2["Plugin2.wrap"]
+        P3["Plugin3"]
+        T --> P1 --> P2 --> P3
+        ChainNote["形成多层代理<br/>最外层是最后一个插件"]
+    end
+
+    ProxyObj["多层代理对象<br/>Executor 的代理的代理的代理..."]
+
+    subgraph CallFlow["方法调用时"]
+        direction TB
+        C1["① 放行（invokeArgs）"]
+        C2["② 改写参数"]
+        C3["③ 完全替换返回值"]
+        C4["④ 阻止调用"]
+    end
+
+    App --> Target
+    Target --> Chain
+    Chain --> ProxyObj
+    ProxyObj --> CallFlow
 ```
 
 #### 7.4 自定义插件示例

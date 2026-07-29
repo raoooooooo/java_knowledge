@@ -50,30 +50,49 @@
 
 **五大基础概念层级图**（以 `third-topic`：3 分区 3 副本为例）
 
-```text
-  ┌─────────────────────────────────────────────────────────────────┐
-  │                     Topic : third-topic                         │ ◀ ① Topic 主题
-  │                       （消息的逻辑分类，最外层容器）               │
-  │                                                                 │
-  │   ┌─────────────┐     ┌─────────────┐     ┌─────────────┐       │
-  │   │ Partition 0 │     │ Partition 1 │     │ Partition 2 │       │ ◀ ② Partition 分区
-  │   │             │     │             │     │             │       │   （物理分片，负载均衡）
-  │   │ ┌─────────┐ │     │ ┌─────────┐ │     │ ┌─────────┐ │       │
-  │   │ │ Replica │ │     │ │ Replica │ │     │ │ Replica │ │       │ ◀ ③ Replica 副本
-  │   │ │★Leader │ │     │ │★Leader │ │     │ │★Leader │ │       │ ◀ ④ Leader（对外读写）
-  │   │ ├─────────┤ │     │ ├─────────┤ │     │ ├─────────┤ │       │
-  │   │ │Follower│ │     │ │Follower│ │     │ │Follower│ │       │ ◀ ④ Follower（仅同步）
-  │   │ ├─────────┤ │     │ ├─────────┤ │     │ ├─────────┤ │       │
-  │   │ │Follower│ │     │ │Follower│ │     │ │Follower│ │       │
-  │   │ └─────────┘ │     │ └─────────┘ │     │ └─────────┘ │       │
-  │   └─────────────┘     └─────────────┘     └─────────────┘       │
-  └─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Topic["① Topic : third-topic — 消息的逻辑分类，最外层容器"]
+        direction TB
+        subgraph Partitions["② Partition 分区 — 物理分片，负载均衡"]
+            direction LR
+            subgraph P0["Partition 0"]
+                direction TB
+                P0_Leader["★ Leader（对外读写）"]
+                P0_F1["Follower（仅同步）"]
+                P0_F2["Follower（仅同步）"]
+            end
+            subgraph P1["Partition 1"]
+                direction TB
+                P1_Leader["★ Leader（对外读写）"]
+                P1_F1["Follower（仅同步）"]
+                P1_F2["Follower（仅同步）"]
+            end
+            subgraph P2["Partition 2"]
+                direction TB
+                P2_Leader["★ Leader（对外读写）"]
+                P2_F1["Follower（仅同步）"]
+                P2_F2["Follower（仅同步）"]
+            end
+        end
+        ReplicaNote["③ Replica 副本：每个 Partition 有 3 份完整副本<br/>④ Leader/Follower：Leader 对外读写，Follower 仅同步备份"]
+    end
 
-  ⑤ Log（日志）：每个 Replica 的消息最终落盘为这些文件
-     /third-topic-0/
-     ├── 00000000000000000000.log        ◀ 消息数据（Kafka 立身之本）
-     ├── 00000000000000000000.index      ◀ 偏移量索引（稀疏，每4K一条）
-     └── 00000000000000000000.timeindex  ◀ 时间戳索引（时间→偏移量）
+    subgraph LogFiles["⑤ Log（日志）— 每个 Replica 的消息最终落盘"]
+        direction TB
+        LogDir["/third-topic-0/"]
+        LogFile["00000000000000000000.log — 消息数据（Kafka 立身之本）"]
+        IndexFile["00000000000000000000.index — 偏移量索引（稀疏，每4K一条）"]
+        TimeIndex["00000000000000000000.timeindex — 时间戳索引（时间→偏移量）"]
+        LogDir --> LogFile
+        LogDir --> IndexFile
+        LogDir --> TimeIndex
+    end
+
+    Topic --> LogFiles
+
+    classDef leader fill:#f9f,stroke:#333,stroke-width:2px;
+    class P0_Leader,P1_Leader,P2_Leader leader;
 ```
 
 > 💡 **图读要点**：① Topic 是逻辑壳子 → ② 内部切成多个 Partition（物理）→ ③ 每个 Partition 有多个 Replica → ④ Replica 分 Leader（干活的）/ Follower（备份的）→ ⑤ 每个 Replica 的数据最终写进 Log 文件。层级是 **Topic ⊃ Partition ⊃ Replica ⊃ (Leader/Follower) → Log**。
@@ -86,13 +105,39 @@
 - **别和 MySQL 分表混淆**：MySQL 分表是"切成片，一片放一节点"（水平分片）；Kafka 分区是"**整个复制**成多份，每份放一个 Broker"，单个副本不切片。
 - 举例（`third-topic` 3 分区 3 副本，3 Broker）：
 
-```text
-        Broker 1            Broker 2            Broker 3
-       ┌──────────┐       ┌──────────┐       ┌──────────┐
-       │ P0-Fol   │       │ P0-Lead★ │       │ P0-Fol   │   ← Partition 0 的 3 个完整副本
-       │ P1-Lead★ │       │ P1-Fol   │       │ P1-Fol   │   ← Partition 1 的 3 个完整副本
-       │ P2-Fol   │       │ P2-Fol   │       │ P2-Lead★ │   ← Partition 2 的 3 个完整副本
-       └──────────┘       └──────────┘       └──────────┘
+```mermaid
+graph LR
+    subgraph B1["Broker 1"]
+        direction TB
+        B1_P0["P0-Follower"]
+        B1_P1["P1-Leader ★"]
+        B1_P2["P2-Follower"]
+    end
+
+    subgraph B2["Broker 2"]
+        direction TB
+        B2_P0["P0-Leader ★"]
+        B2_P1["P1-Follower"]
+        B2_P2["P2-Follower"]
+    end
+
+    subgraph B3["Broker 3"]
+        direction TB
+        B3_P0["P0-Follower"]
+        B3_P1["P1-Follower"]
+        B3_P2["P2-Leader ★"]
+    end
+
+    Note0["← Partition 0 的 3 个完整副本"]
+    Note1["← Partition 1 的 3 个完整副本"]
+    Note2["← Partition 2 的 3 个完整副本"]
+
+    B1_P0 --- Note0
+    B1_P1 --- Note1
+    B1_P2 --- Note2
+
+    classDef leader fill:#f9f,stroke:#333,stroke-width:2px;
+    class B1_P1,B2_P0,B3_P2 leader;
 ```
   看 P0 这一行：Partition 0 在 3 个 Broker 上各有一份**完整拷贝**（非 1/3），Broker2 的 P0 是 Leader，其余是 Follower。
 
@@ -123,71 +168,55 @@ kafka-topics.sh --bootstrap-server kafka-broker1:9092 --create \
 
 **生产者写入消息全流程原理图**
 
-```text
- ┌─────────────────────────────────────────────────────────────────────┐
- │ 主线程 (Main Thread)  ── 你的业务代码调用 producer.send(record)      │
- │                                                                      │
- │  ProducerRecord(topic,key,value)                                      │
- │         │                                                            │
- │         ▼                                                            │
- │  ① 拦截器 Interceptors ── 发送前统一处理(校验/打点)，可配多个，顺序执行 │
- │         │                                                            │
- │         ▼                                                            │
- │  ② 序列化 Serializer ── 把 Key、Value 各自转成 byte[]                │
- │         │                                                            │
- │         ▼                                                            │
- │  ③ 分区器 Partitioner ── 算出消息发往哪个 partition（指定/Key哈希/粘性）│
- │         │                                                            │
- │         ▼                                                            │
- │  ④ 追加 append ── 把消息丢进缓冲区                                    │
- └─────────┬────────────────────────────────────────────────────────────┘
-           │
-           ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │ ⑤ RecordAccumulator 数据收集器（缓冲区）                             │
- │                                                                      │
- │   按【分区】攒批，每个分区维护一个双端队列 Deque<ProducerBatch>         │
- │                                                                      │
- │   Partition0: [Batch A (16K,已满关闭)] [Batch D (新)...]             │
- │   Partition1: [Batch B (8K,未满)]                                   │
- │   Partition2: [Batch C (16K,已满关闭)]                               │
- │                                                                      │
- │   * 同一分区的消息凑进同一个 Batch，攒满 16K 或超 linger.ms 就关闭     │
- └─────────┬────────────────────────────────────────────────────────────┘
-           │ 取「已关闭/超时」的 Ready Batch
-           ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │ ⑥ Sender 线程（后台守护线程，真正的"消费者"）                          │
- │                                                                      │
- │   从收集器捞出 Ready Batch，按【目标 Broker】重新分组打包               │
- │                                                                      │
- │   → Broker1: [Partition0 的 BatchA, Partition2 的 BatchC]            │
- │   → Broker2: [Partition1 的 BatchB]                                  │
- └─────────┬────────────────────────────────────────────────────────────┘
-           │
-           ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │ ⑦ NetworkClient (NIO 网络客户端)                                      │
- │    把 Produce 请求通过网络发给对应 Broker                              │
- └─────────┬────────────────────────────────────────────────────────────┘
-           │
-           ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │ ⑧ Broker 接收并写入日志                                               │
- │                                                                      │
- │   KafkaApis(路由) → ReplicaManager(ACK/事务校验) → Partition            │
- │     → Log → LogSegment 用 FileChannel 写入 .log 文件                  │
- │                                                                      │
- │   Follower 副本从 Leader 拉取同步（见 1.4 副本同步）                  │
- │   按 acks 返回应答:  0=不等  1=Leader写完  -1=ISR全写完                │
- └─────────┬────────────────────────────────────────────────────────────┘
-           │ ACK 应答返回
-           ▼
- ┌─────────────────────────────────────────────────────────────────────┐
- │ ⑨ 回调 Callback ── onCompletion(metadata, exception)                  │
- │    异步发送: 触发回调处理结果                                          │
- │    同步发送: Future.get() 收到应答才解除阻塞，继续发下一条              │
- └─────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph MainThread["主线程 Main Thread — 调用 producer.send(record)"]
+        PR["ProducerRecord(topic, key, value)"]
+        S1["① 拦截器 Interceptors<br/>发送前统一处理（校验/打点），可配多个，顺序执行"]
+        S2["② 序列化 Serializer<br/>把 Key、Value 各自转成 byte[]"]
+        S3["③ 分区器 Partitioner<br/>算出消息发往哪个 partition（指定/Key哈希/粘性）"]
+        S4["④ 追加 append — 把消息丢进缓冲区"]
+        PR --> S1 --> S2 --> S3 --> S4
+    end
+
+    subgraph Accumulator["⑤ RecordAccumulator 数据收集器（缓冲区）"]
+        direction TB
+        AccDesc["按【分区】攒批，每个分区维护双端队列 Deque&lt;ProducerBatch&gt;"]
+        subgraph Batches["批次队列"]
+            direction TB
+            B0["Partition0: [Batch A (16K, 已满关闭)] [Batch D (新)...]"]
+            B1["Partition1: [Batch B (8K, 未满)]"]
+            B2["Partition2: [Batch C (16K, 已满关闭)]"]
+        end
+        AccNote["同一分区的消息凑进同一个 Batch<br/>攒满 16K 或超 linger.ms 就关闭"]
+    end
+
+    subgraph SenderThread["⑥ Sender 线程 — 后台守护线程，真正的\"消费者\""]
+        direction TB
+        SenderDesc["从收集器捞出 Ready Batch，按【目标 Broker】重新分组打包"]
+        subgraph BrokerGrouping["按 Broker 重组"]
+            direction TB
+            BG1["→ Broker1: [P0 BatchA, P2 BatchC]"]
+            BG2["→ Broker2: [P1 BatchB]"]
+        end
+    end
+
+    S7["⑦ NetworkClient — NIO 网络客户端<br/>把 Produce 请求通过网络发给对应 Broker"]
+
+    subgraph BrokerWrite["⑧ Broker 接收并写入日志"]
+        direction TB
+        BW_Path["KafkaApis(路由) → ReplicaManager(ACK/事务校验)<br/>→ Partition → Log → LogSegment 写入 .log 文件"]
+        BW_Ack["按 acks 返回应答:  0=不等  1=Leader写完  -1=ISR全写完"]
+        BW_Follower["Follower 副本从 Leader 拉取同步"]
+    end
+
+    S9["⑨ 回调 Callback — onCompletion(metadata, exception)<br/>异步发送: 触发回调处理结果<br/>同步发送: Future.get() 收到应答才解除阻塞"]
+
+    S4 --> Accumulator
+    Accumulator -->|取已关闭/超时的 Ready Batch| SenderThread
+    SenderThread --> S7
+    S7 --> BrokerWrite
+    BrokerWrite -->|ACK 应答返回| S9
 ```
 
 > 💡 **核心理解：双线程的生产者-消费者模式**
@@ -374,28 +403,22 @@ producer.send(record);
 
 **分区选择判断流程**
 
-```text
-  ProducerRecord 构造时指定了 partition？
-        │
-   ┌────┴────┐
-   是        否
-   │         │
-   ▼         ▼
- 直接用    配置了自定义 partitioner.class？
- 该分区         │
-          ┌────┴────┐
-          是        否
-          │         │
-          ▼         ▼
-        调用      用默认分区器
-        自定义       DefaultPartitioner
-        partition()   │
-                  ┌───┴───┐
-                 有Key   无Key
-                  │       │
-                  ▼       ▼
-            murmur2(key)  粘性分区
-            % 分区数     (攒满批次再换)
+```mermaid
+flowchart TD
+    Q1["ProducerRecord 构造时<br/>指定了 partition？"]
+    A1_Yes["直接用该分区"]
+    Q2["配置了自定义<br/>partitioner.class？"]
+    A2_Yes["调用自定义 partition()"]
+    Q3["用默认分区器 DefaultPartitioner<br/>有 Key？"]
+    A3_Yes["murmur2(key) % 分区数"]
+    A3_No["粘性分区（攒满批次再换）"]
+
+    Q1 -->|是| A1_Yes
+    Q1 -->|否| Q2
+    Q2 -->|是| A2_Yes
+    Q2 -->|否| Q3
+    Q3 -->|有 Key| A3_Yes
+    Q3 -->|无 Key| A3_No
 ```
 
 > 💡 **一句话记忆**：**指定分区 > 自定义分区器 > 有Key哈希 > 无Key粘性**，优先级从高到低，前面命中后面就不走。
@@ -471,26 +494,31 @@ producer.send(record);
 
 **事务提交流程（两步，但不是经典 2PC）**
 
-```text
-  Producer                        TransactionCoordinator              各分区Leader
-     │                                  │                                   │
-     │  1. initTransactions() 报到       │                                   │
-     ├─────────────────────────────────►│ 分配/找回 PID，记下 <tx.id,PID>      │
-     │                                  │ 写入 __transaction_state           │
-     │  2. beginTransaction()           │                                   │
-     ├─────────────────────────────────►│ 事务状态 -> Ongoing                │
-     │                                  │                                   │
-     │  3. send(A) send(B) send(C)      │                                   │
-     ├──────────────────────────────────────────────────────────────────────►│ 写入(未提交,不可见)
-     │                                  │                                   │
-     │  4. commitTransaction()          │                                   │
-     ├─────────────────────────────────►│ ① 预提交: 写日志标记 PREPARE_COMMIT  │
-     │                                  │ 事务状态 -> PrepareCommit          │
-     │                                  │ ② 向各分区发 commit Marker ──────►│ 写入 COMMIT marker
-     │                                  │ 事务状态 -> CompleteCommit         │
-     │  ◄─── 提交成功返回 ──────────────│                                   │
-     │                                                                      │
-     │   此时消费者才能读到 A、B、C                                           │
+```mermaid
+sequenceDiagram
+    participant P as Producer
+    participant TC as TransactionCoordinator
+    participant L as 各分区 Leader
+
+    Note over P,L: 事务提交流程（非经典 2PC）
+
+    P->>TC: 1. initTransactions() 报到
+    TC->>TC: 分配/找回 PID，记下 &lt;tx.id, PID&gt;<br/>写入 __transaction_state
+
+    P->>TC: 2. beginTransaction()
+    TC->>TC: 事务状态 → Ongoing
+
+    P->>L: 3. send(A) send(B) send(C)
+    L->>L: 写入（未提交，消费者不可见）
+
+    P->>TC: 4. commitTransaction()
+    TC->>TC: ① 预提交：写日志 PREPARE_COMMIT<br/>事务状态 → PrepareCommit
+    TC->>L: ② 向各分区发 commit Marker
+    L->>L: 写入 COMMIT marker
+    TC->>TC: 事务状态 → CompleteCommit
+    TC-->>P: 提交成功返回
+
+    Note over P,L: 此时消费者才能读到 A、B、C
 ```
 
 - **第一步**：协调器把事务状态改成 PREPARE（预提交），先记入事务日志 `__transaction_state`（持久化，防协调器自己挂了）
@@ -509,17 +537,16 @@ producer.send(record);
 
 **时间线**（最容易绕的点）：
 
-```text
-时间 ──────────────────────────────────────────────►
+```mermaid
+timeline
+    title 事务提交时间线
+    send(msg) : 消息写入分区（已写但消费者不可见）
+    第一步 PREPARE : 协调器记日志"要提交"（防协调器宕机）
+    第二步 COMMIT  : 发 Marker 让消息可见 : 消费者从这一刻开始才能看到消息
 
-  send(msg)        第一步PREPARE       第二步COMMIT
-     │                  │                   │
-     ▼                  ▼                   ▼
-  消息写入分区      记日志"要提交"      发Marker让可见
-  (已写但不可见)   (防协调器宕机)      (消费者这才看到)
-     │                                        │
-     └──── 这段时间消费者看不到消息 ────────────┘
-                                         ▲ 消息变可见
+    section 消费者看不到消息
+        send(msg) → 第一步 PREPARE → 第二步 COMMIT 前
+    end
 ```
 
 **为什么非要两步？一步不行吗？**
@@ -636,13 +663,16 @@ try {
 
 **可靠性递进**
 
-```text
-  可靠性/成本递增 ──────────────────────────────────────►
-
-    At Most Once        At Least Once        Exactly Once
-    (acks=0)            (acks=1/-1+重试)      (幂等+事务+acks=-1)
-     会丢不重            不丢会重              不丢不重
-     最高吞吐            中等吞吐              最低吞吐
+```mermaid
+graph LR
+    direction LR
+    subgraph Arrow["可靠性 / 成本递增 →"]
+        direction LR
+        A["At Most Once<br/>acks=0<br/>会丢不重<br/>最高吞吐"]
+        B["At Least Once<br/>acks=1/-1 + 重试<br/>不丢会重<br/>中等吞吐"]
+        C["Exactly Once<br/>幂等 + 事务 + acks=-1<br/>不丢不重<br/>最低吞吐"]
+        A --> B --> C
+    end
 ```
 
 > 💡 规律：可靠性越高，性能开销越大（要等更多确认、要去重、要协调）。鱼和熊掌的权衡。
@@ -702,23 +732,17 @@ KafkaApis(请求路由) → ReplicaManager(副本管理/ACK校验)
 
 每个 Follower 启动一个同步线程 `ReplicaFetcherThread`，**不停循环做两件事**：
 
-```text
-   Follower                              Leader
-      │                                    │
-      │  1. 截断 truncate                   │
-      │  (把自己日志里"不该有"的删除，       │
-      │   保证和Leader起点一致)             │
-      ├───────────────────────────────────►│
-      │                                    │
-      │  2. 抓取 fetch                      │
-      │  (带着自己的LEO请求："给我这个       │
-      │   offset之后的新数据")              │
-      ├───────────────────────────────────►│
-      │  ◄─── 返回新数据 + Leader的HW ──────┤
-      │                                    │
-      │  3. 写入本地日志，更新自己的LEO、HW   │
-      │                                    │
-      └── 循环回到第1步 ─────────────────────┘
+```mermaid
+sequenceDiagram
+    participant F as Follower
+    participant L as Leader
+
+    loop 同步循环（ReplicaFetcherThread 不断重复）
+        F->>L: 1. 截断 truncate<br/>把自己日志里"不该有"的删除<br/>保证和 Leader 起点一致
+        F->>L: 2. 抓取 fetch<br/>带着自己的 LEO 请求"给我这个 offset 之后的新数据"
+        L-->>F: 返回新数据 + Leader 的 HW
+        F->>F: 3. 写入本地日志<br/>更新自己的 LEO、HW
+    end
 ```
 
 - **截断 truncate**：如果 Follower 本地日志和 Leader 不一致（比如 Follower 之前当过 Leader 有多余数据），先把多余部分删掉，保证起点对齐
@@ -729,19 +753,37 @@ KafkaApis(请求路由) → ReplicaManager(副本管理/ACK校验)
 
 **四个关键位移概念（务必分清）**
 
-```text
-   某个副本的日志：
-   ┌──┬──┬──┬──┬──┬──┬──┬──┬──┐
-   │m0│m1│m2│m3│m4│m5│  │  │  │
-   └──┴──┴──┴──┴──┴──┴──┴──┴──┘
-   ↑           ↑        ↑           ↑
-   LSO         已提交    LEO         (未来)
-   (0)         (HW=3)   (下一条=6)
+```mermaid
+graph LR
+    subgraph Log["某个副本的日志（9 个槽位）"]
+        direction LR
+        m0["m0"]
+        m1["m1"]
+        m2["m2"]
+        m3["m3"]
+        m4["m4"]
+        m5["m5"]
+        e1[" "]
+        e2[" "]
+        e3[" "]
+    end
 
-   LSO  Log Start Offset  : 副本数据起始位置，初始0
-   LEO  Log End Offset    : 下一条待写入消息的offset，每个副本各自维护
-   HW   High Watermark     : 高水位，消费者可见的最大offset（已提交）
-   Offset                  : 消息在分区的序号，从0开始
+    LSO_Arrow["↑ LSO = 0<br/>Log Start Offset<br/>副本数据起始位置"]
+    HW_Arrow["↑ HW = 3 已提交<br/>High Watermark<br/>消费者可见的最大 offset"]
+    LEO_Arrow["↑ LEO = 6（下一条）<br/>Log End Offset<br/>下一条待写入消息的 offset"]
+    Future_Arrow["↑ 未来位置"]
+
+    LSO_Arrow -.-> m0
+    HW_Arrow -.-> m3
+    LEO_Arrow -.-> e1
+    Future_Arrow -.-> e3
+
+    classDef committed fill:#9f9,stroke:#333;
+    classDef written fill:#ff9,stroke:#333;
+    classDef empty fill:#eee,stroke:#ccc;
+    class m0,m1,m2 committed;
+    class m3,m4,m5 written;
+    class e1,e2,e3 empty;
 ```
 
 | 概念 | 全称 | 含义 | 谁维护 |
@@ -761,11 +803,23 @@ KafkaApis(请求路由) → ReplicaManager(副本管理/ACK校验)
 
 为什么这么做？看场景：
 
-```text
-分区有3个副本：Leader(A) + Follower(B) + Follower(C)
-A 收到新消息：m3, m4, m5  (A的LEO=6)
-   B 还没同步，B的LEO=4
-   C 还没同步，C的LEO=3   ← 最慢的
+```mermaid
+graph TB
+    subgraph LeaderA["Leader A — LEO = 6（最快）"]
+        A_m0["m0"] A_m1["m1"] A_m2["m2"]
+        A_m3["m3"] A_m4["m4"] A_m5["m5"]
+    end
+    subgraph FollowerB["Follower B — LEO = 4"]
+        B_m0["m0"] B_m1["m1"] B_m2["m2"]
+        B_m3["m3"] B_empty1[" "] B_empty2[" "]
+    end
+    subgraph FollowerC["Follower C — LEO = 3（最慢，拖低 HW）"]
+        C_m0["m0"] C_m1["m1"] C_m2["m2"]
+        C_empty1[" "] C_empty2[" "] C_empty3[" "]
+    end
+
+    HW_Note["HW = min(6, 4, 3) = 3<br/>消费者只能读到 m0~m2<br/>最慢副本决定可见水位"]
+    FollowerC --> HW_Note
 ```
 
 如果消费者能读 A 的全部数据（读到 m5），万一此时 A 宕机，C 被选为新 Leader，C 只有 m0~m2（LEO=3），那 m3/m4/m5 就"丢"了 -> **消费者会感知到数据丢失**。
@@ -774,24 +828,19 @@ A 收到新消息：m3, m4, m5  (A的LEO=6)
 
 **HW 完整推演（看一遍就懂）**
 
-```text
-初始：Leader和两个Follower都是空的，LEO=0, HW=0
+```mermaid
+flowchart TD
+    Init["初始状态<br/>Leader 和两个 Follower 都为空<br/>LEO = 0, HW = 0"]
 
-① 生产者发2条消息给Leader
-   Leader:  LEO=2,  HW=min(2,0,0)=0  (还没等Follower同步)
-                 │
-② Follower拉取，上报自己的LEO=0
-   Leader收到后算HW=min(2,0,0)=0，把数据+HW一起发给Follower
-   Follower-1: 收到2条, LEO=2, HW=min(LeaderHW=0, 自己LEO=2)=0
-   Follower-2: 收到1条, LEO=1, HW=min(LeaderHW=0, 自己LEO=1)=0
-                 │
-③ Follower再次拉取，上报新LEO
-   Leader:  HW=min(2,2,1)=1  ← 推到1了！
-   把HW=1发给Follower
-   Follower-1: HW=min(1,2)=1
-   Follower-2: HW=min(1,1)=1
-                 │
-④ 不断循环，HW随Follower追上而上涨
+    Step1["① 生产者发 2 条消息给 Leader<br/>Leader: LEO=2, HW=min(2,0,0)=0<br/>（还没等 Follower 同步）"]
+
+    Step2["② Follower 拉取，上报自己的 LEO=0<br/>Leader 算 HW=min(2,0,0)=0，把数据+HW一起发<br/>Follower-1: 收到2条, LEO=2, HW=min(0,2)=0<br/>Follower-2: 收到1条, LEO=1, HW=min(0,1)=0"]
+
+    Step3["③ Follower 再次拉取，上报新 LEO<br/>Leader: HW=min(2,2,1)=1 ← 推到 1 了！<br/>把 HW=1 发给 Follower<br/>Follower-1: HW=min(1,2)=1<br/>Follower-2: HW=min(1,1)=1"]
+
+    Step4["④ 不断循环，HW 随 Follower 追上而上涨"]
+
+    Init --> Step1 --> Step2 --> Step3 --> Step4
 ```
 
 > 💡 规律：**HW 的推进取决于最慢的 Follower**。只有所有 ISR 副本都同步到某个 offset，HW 才推到那里。所以 HW ≤ 任意副本的 LEO。
@@ -807,10 +856,16 @@ ISR 不只是一个"列表"，它有**三层含义**，面试常考：
 | **② 同步判定标准** | 不是"一字不差"，而是**在规定时间内追上过 Leader** |
 | **③ 动态管理机制** | ISR 不固定，动态伸缩：跟不上踢出(Shrink)，追上拉回(Expand) |
 
-```text
-   ISR (In-Sync Replicas) : 跟Leader保持同步的副本（含Leader）
-   OSR (Out-of-Sync)      : 落后过多的副本
-   AR (All Replicas)      : 全部副本 = ISR + OSR
+```mermaid
+graph LR
+    subgraph AR["AR — All Replicas（全部副本）"]
+        direction TB
+        subgraph ISR["ISR — In-Sync Replicas（跟 Leader 保持同步的副本，含 Leader）"]
+            Leader["Leader 副本"]
+            ISR_F["同步中 Follower"]
+        end
+        OSR["OSR — Out-of-Sync Replicas（落后过多的副本）"]
+    end
 ```
 
 **"同步"的判定标准（最易被忽略的点）**
@@ -830,14 +885,23 @@ ISR 不只是一个"列表"，它有**三层含义**，面试常考：
 
 所以 ISR 要动态调整，这就是"伸缩"：
 
-```text
-  收缩 Shrink（ISR变小）             扩大 Expand（ISR变大）
-  ISR={A,B,C}                         ISR={A,B}
-  C 慢，超 replica.lag.time.max.ms     被踢的 C 拼命追，追上 Leader LEO
-       │                                    │
-       ▼                                    ▼
-  踢出C: ISR={A,B}, C进入OSR           拉回C: ISR={A,B,C}
-  (目的: 不再等C，ACK变快，HW快推)     (目的: 恢复副本数，提高可靠性)
+```mermaid
+graph LR
+    subgraph Shrink["收缩 Shrink — ISR 变小"]
+        S1["ISR = {A, B, C}"]
+        S2["C 慢，超 replica.lag.time.max.ms"]
+        S3["踢出 C：ISR = {A, B}，C 进入 OSR"]
+        S4["目的：不再等 C，ACK 变快，HW 快推"]
+        S1 --> S2 --> S3 --> S4
+    end
+
+    subgraph Expand["扩大 Expand — ISR 变大"]
+        E1["ISR = {A, B}"]
+        E2["被踢的 C 拼命追，追上 Leader LEO"]
+        E3["拉回 C：ISR = {A, B, C}"]
+        E4["目的：恢复副本数，提高可靠性"]
+        E1 --> E2 --> E3 --> E4
+    end
 ```
 
 **伸缩带来的两个重要影响**
@@ -874,16 +938,15 @@ ISR 不只是一个"列表"，它有**三层含义**，面试常考：
 
 **通俗类比：国王换届**
 
-```text
-第1代国王(Epoch=1)在位：颁布法令都用 Epoch=1 标记
-       │
-    国王驾崩(宕机)
-       │
-第2代国王(Epoch=2)继位：任期号变2
-       │
-       ▼
-有人拿 Epoch=1 的旧文件来办事
-  -> 新国王："这是上一代旧文件，作废！不认！"
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Epoch1
+    Epoch1: 第 1 代国王（Epoch=1）<br/>颁布法令都用 Epoch=1 标记
+    Epoch1 --> Epoch2: 国王驾崩（宕机）
+    Epoch2: 第 2 代国王（Epoch=2）<br/>任期号变 2
+    Epoch2 --> Reject: 有人拿 Epoch=1 的旧文件来办事
+    Reject: 新国王："这是上一代旧文件，作废！不认！"
 ```
 
 > 💡 Epoch 的本质 = **防止"过期的旧势力"复活搞乱**。任何带旧 Epoch 的请求/数据，都被当"前朝遗老"直接拒绝。
@@ -902,12 +965,16 @@ ISR 不只是一个"列表"，它有**三层含义**，面试常考：
 
 HW 截断的问题是"粗粒度"：Follower 重启时盲目截断到 HW，可能删掉其实已提交的消息。Leader Epoch 用"精确换届"代替"粗水位"：
 
-```text
-Follower B 重启后，不再直接截断到 HW，而是：
-  1. 向 Leader 发 OffsetsForLeaderEpoch 请求，问："你当前 Leader Epoch 是多少？"
-  2. Leader 返回：当前 Epoch=N，以及该 Epoch 的起始 offset
-  3. Follower B 据此精确截断：只删"旧 Epoch 对应的、确实不该有的数据"
-     -> 不会误删"新 Epoch 下已提交"的消息
+```mermaid
+sequenceDiagram
+    participant F as Follower B
+    participant L as Leader
+
+    Note over F,L: Leader Epoch 精确截断（替代粗粒度 HW 截断）
+
+    F->>L: 1. OffsetsForLeaderEpoch 请求<br/>"你当前 Leader Epoch 是多少？"
+    L-->>F: 2. 返回：当前 Epoch = N<br/>及该 Epoch 的起始 offset
+    F->>F: 3. 据此精确截断<br/>只删"旧 Epoch 对应的、确实不该有的数据"<br/>不会误删"新 Epoch 下已提交"的消息
 ```
 
 - Leader 在每个日志段维护一份  的映射文件（叫 checkpoint）
@@ -952,13 +1019,35 @@ Follower B 重启后，不再直接截断到 HW，而是：
 
 > 消费者能读的消息，是日志里的一个"有效窗口"，左右边界分别由 LSO 和 HW 决定：
 
-```text
-日志:  [已删除]  m5  m6  m7  m8  [未提交]
-        ↑        ↑              ↑       ↑
-       无      LSO=5         HW=9    LEO=10
-              (最早能读)    (最远能读)
+```mermaid
+graph LR
+    subgraph Log["日志分区"]
+        direction LR
+        Del["[已删除] 0~4"]
+        m5["m5"]
+        m6["m6"]
+        m7["m7"]
+        m8["m8"]
+        Uncommitted["[未提交] m9+"]
+    end
 
-       可读窗口 = [LSO=5, HW=9) = m5,m6,m7,m8
+    LSO_note["↑ LSO = 5<br/>最早能读"]
+    HW_note["↑ HW = 9<br/>最远能读"]
+    LEO_note["↑ LEO = 10<br/>下一条待写入"]
+
+    LSO_note -.-> m5
+    HW_note -.-> Uncommitted
+    LEO_note -.-> Uncommitted
+
+    Window["可读窗口 = [LSO=5, HW=9) = m5, m6, m7, m8"]
+    m5 --- Window
+
+    classDef deleted fill:#eee,stroke:#ccc;
+    classDef readable fill:#9f9,stroke:#333;
+    classDef uncommitted fill:#ff9,stroke:#333;
+    class Del deleted;
+    class m5,m6,m7,m8 readable;
+    class Uncommitted uncommitted;
 ```
 
 | 边界 | 含义 |
@@ -983,12 +1072,26 @@ Follower B 重启后，不再直接截断到 HW，而是：
 
 > 假设分区现有 m0~m9（LSO=0, HW=10, LEO=10），新消费者组首次接入：
 
-```text
-  auto.offset.reset    起点          读到什么
-  ─────────────────────────────────────────────────────
-  earliest            LSO=0         m0~m9 (历史全量)
-  latest(默认)        当前LEO=10    跳过m0~m9，只读之后的m10...
-  none                —             抛异常
+```mermaid
+graph TB
+    subgraph Table["auto.offset.reset 起点对比（假设分区 m0~m9 已存在）"]
+        direction TB
+        subgraph Row1["earliest"]
+            direction LR
+            R1_start["起点：LSO（示例=0）"]
+            R1_read["读到：m0~m9（历史全量）"]
+        end
+        subgraph Row2["latest（默认）"]
+            direction LR
+            R2_start["起点：当前 LEO（示例=10）"]
+            R2_read["读到：跳过 m0~m9，只读 m10 之后"]
+        end
+        subgraph Row3["none"]
+            direction LR
+            R3_start["起点：—"]
+            R3_read["读到：抛异常 OffsetOutOfRangeException"]
+        end
+    end
 ```
 
 - ⚠️ **latest 起点是"连接时的 LEO"，不是 HW**！连接前积压的消息一条都不读

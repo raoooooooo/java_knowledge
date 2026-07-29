@@ -515,12 +515,12 @@ Java HotSpot(TM) 64-Bit Server VM (build 25.281-b09, mixed mode)
 
 #### 1. 解释执行（Interpreter）
 
-```
-.java 源代码
-    ↓ javac 前端编译
-.class 字节码（Bytecode）
-    ↓ JVM解释器 ←【解释执行在这里】
-逐条翻译字节码为机器码，逐条执行
+```mermaid
+graph TD
+    A[".java 源代码"] -->|"javac 前端编译"| B[".class 字节码（Bytecode）"]
+    B -->|"JVM 解释器"| C["逐条翻译字节码为机器码<br>逐条执行"]
+
+    style C fill:#fff3e0,stroke:#e65100
 ```
 
 **特点**：
@@ -535,14 +535,13 @@ Java HotSpot(TM) 64-Bit Server VM (build 25.281-b09, mixed mode)
 
 #### 2. JIT编译执行（Just-In-Time Compilation）
 
-```
-.java → .class → JVM运行
-                ↓
-JIT编译器发现某段代码被频繁调用（热点代码）
-                ↓
-把这段字节码直接编译成本地机器码，缓存起来
-                ↓
-下次再调用这段代码，直接执行机器码，不需要再翻译！
+```mermaid
+graph TD
+    A[".java → .class → JVM 运行"] --> B["JIT 编译器发现热点代码<br>（被频繁调用的代码）"]
+    B --> C["把字节码直接编译成本地机器码<br>缓存起来"]
+    C --> D["下次调用直接执行机器码<br>不需要再翻译！"]
+
+    style D fill:#c8e6c9,stroke:#2e7d32
 ```
 
 **特点**：
@@ -557,14 +556,14 @@ JIT编译器发现某段代码被频繁调用（热点代码）
 
 #### 3. 为什么必须是混合模式？
 
-```
-刚启动 → 用解释器，快速启动，不用等编译
-    ↓
-跑了一会儿 → JIT发现哪些是热点代码了
-    ↓
-把热点代码编译成机器码，缓存起来
-    ↓
-后面越跑越快！
+```mermaid
+graph TD
+    A["刚启动 → 用解释器<br>快速启动，不用等编译"] --> B["跑了一会儿 → JIT 发现热点代码"]
+    B --> C["把热点代码编译成机器码，缓存起来"]
+    C --> D["后面越跑越快！"]
+
+    style A fill:#e3f2fd,stroke:#1565c0
+    style D fill:#c8e6c9,stroke:#2e7d32
 ```
 
 **总结**：混合模式取两者的优点——启动不慢，峰值性能还高！
@@ -584,12 +583,14 @@ JDK 7之后，HotSpot引入了分层编译，实际上有5个编译层级：
 | **4** | 深度优化编译 | C2（Server） | 编译慢，优化最激进，性能最高 |
 
 **代码的"升级"路线**：
-```
-新方法开始执行 → 层级0（解释执行）
-      ↓ 调用次数达到 10000 次（默认值）
-   层级3（C1全优化编译）
-      ↓ 继续跑，收集到足够的Profiling信息
-   层级4（C2深度优化编译）← 达到最高性能！
+```mermaid
+graph TD
+    A["新方法开始执行<br>层级 0：解释执行"] -->|"调用次数达 10000 次（默认）"| B["层级 3：C1 全优化编译"]
+    B -->|"收集到足够 Profiling 信息"| C["层级 4：C2 深度优化编译<br>（达到最高性能！）"]
+
+    style A fill:#e3f2fd,stroke:#1565c0
+    style B fill:#fff3e0,stroke:#e65100
+    style C fill:#c8e6c9,stroke:#2e7d32
 ```
 
 > 🔥 **这就是为什么Java服务要"预热"的原因！**
@@ -633,15 +634,25 @@ C2编译器的优化非常激进，很多你想不到的优化它都做了：
 
 **面试高频题！标准答案：两者都是，而且是三阶段！**
 
-```
-阶段1：前端编译
-  *.java → javac → *.class 字节码 ← 这是编译
+```mermaid
+graph TD
+    subgraph S1["阶段 1：前端编译"]
+        A1["*.java"] -->|"javac"| A2["*.class 字节码<br>（编译）"]
+    end
 
-阶段2：解释执行
-  JVM加载字节码，解释器逐条解释执行 ← 这是解释
+    subgraph S2["阶段 2：解释执行"]
+        B1["JVM 加载字节码<br>解释器逐条解释执行<br>（解释）"]
+    end
 
-阶段3：JIT编译（运行时）
-  热点代码被JIT编译成本地机器码 ← 这又是编译
+    subgraph S3["阶段 3：JIT 编译（运行时）"]
+        C1["热点代码被 JIT 编译<br>成本地机器码<br>（又是编译）"]
+    end
+
+    S1 --> S2 --> S3
+
+    style S1 fill:#e3f2fd,stroke:#1565c0
+    style S2 fill:#fff3e0,stroke:#e65100
+    style S3 fill:#c8e6c9,stroke:#2e7d32
 ```
 
 **所以正确的回答是**：
@@ -653,12 +664,12 @@ C2编译器的优化非常激进，很多你想不到的优化它都做了：
 
 #### CPython（官方Python）：纯解释执行！
 
-```
-.py 源代码
-    ↓
-.pyc 字节码（第一次运行生成，后面直接用）
-    ↓ CPython解释器（PVM）
-逐条执行字节码
+```mermaid
+graph TD
+    A[".py 源代码"] --> B[".pyc 字节码<br>（第一次运行生成，后面直接用）"]
+    B -->|"CPython 解释器（PVM）"| C["逐条执行字节码"]
+
+    style C fill:#fff3e0,stroke:#e65100
 ```
 
 **和Java的关键区别**：

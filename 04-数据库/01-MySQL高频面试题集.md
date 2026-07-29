@@ -14,34 +14,37 @@ MySQL 整体分为 **Server 层** 和 **存储引擎层** 两大部分，插件�
 
 **架构示意图：**
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                        客户端 (Client)                    │
-│            JDBC / Navicat / Python MySQLdb 等            │
-└────────────────────────────┬─────────────────────────────┘
-                             │ TCP/IP / Socket
-┌────────────────────────────▼─────────────────────────────┐
-│                      MySQL Server 层                      │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  连接器   │  │ 查询缓存 │  │  分析器   │  │  优化器   │  │
-│  │Connector │  │Query Cache│  │ Analyzer │  │ Optimizer│  │
-│  └─────┬────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-│        │            │             │              │        │
-│        ▼            ▼             ▼              ▼        │
-│  ┌──────────────────────────────────────────────────┐    │
-│  │                    执行器 (Executor)               │    │
-│  │      调用存储引擎接口，执行 SQL 并返回结果          │    │
-│  └───────────────────────┬──────────────────────────┘    │
-└──────────────────────────┼───────────────────────────────┘
-                           │ 存储引擎接口 (Handler API)
-┌──────────────────────────▼───────────────────────────────┐
-│                     存储引擎层 (Engine)                    │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│  │ InnoDB   │  │ MyISAM   │  │ Memory   │  │   ...    │  │
-│  │ (默认)   │  │          │  │          │  │          │  │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  │
-│                     数据文件 (磁盘)                        │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph client["客户端 (Client)"]
+        C[JDBC / Navicat / Python MySQLdb 等]
+    end
+
+    subgraph server["MySQL Server 层"]
+        direction TB
+        Connector["连接器<br/>Connector"]
+        QueryCache["查询缓存<br/>Query Cache"]
+        Analyzer["分析器<br/>Analyzer"]
+        Optimizer["优化器<br/>Optimizer"]
+        Executor["执行器 (Executor)<br/>调用存储引擎接口，执行 SQL 并返回结果"]
+
+        Connector --> Executor
+        QueryCache --> Executor
+        Analyzer --> Executor
+        Optimizer --> Executor
+    end
+
+    subgraph engine["存储引擎层 (Engine)"]
+        direction LR
+        InnoDB["InnoDB<br/>(默认)"]
+        MyISAM["MyISAM"]
+        Memory["Memory"]
+        Others["..."]
+        Disk["数据文件 (磁盘)"]
+    end
+
+    C -->|"TCP/IP / Socket"| Connector
+    Executor -->|"存储引擎接口<br/>(Handler API)"| InnoDB
 ```
 
 **Server 层各组件详解：**
@@ -56,27 +59,28 @@ MySQL 整体分为 **Server 层** 和 **存储引擎层** 两大部分，插件�
 
 **一条 SELECT 查询的完整执行链路：**
 
-```
-客户端 → 连接器（认证+建连）
-       → 查询缓存（8.0 已移除，命中则直接返回）
-       → 分析器（词法分析→语法分析→构建解析树）
-       → 优化器（基于成本生成执行计划，选择索引）
-       → 执行器（校验权限 → 调用引擎接口）
-       → 存储引擎（InnoDB 读取数据页 → Buffer Pool → 返回）
-       → 执行器逐行发送结果给客户端
+```mermaid
+graph LR
+    A[客户端] --> B[连接器<br/>认证+建连]
+    B --> C[查询缓存<br/>8.0 已移除，命中则直接返回]
+    C --> D[分析器<br/>词法分析→语法分析→构建解析树]
+    D --> E[优化器<br/>基于成本生成执行计划，选择索引]
+    E --> F[执行器<br/>校验权限 → 调用引擎接口]
+    F --> G[存储引擎<br/>InnoDB 读取数据页 → Buffer Pool → 返回]
+    G --> H[执行器逐行发送结果给客户端]
 ```
 
 一条 **UPDATE/DELETE** 语句的执行链路（比 SELECT 多了事务日志部分）：
 
-```
-... → 执行器调用引擎 → 引擎：
-  1. 从 Buffer Pool 读取数据页（不在则从磁盘加载）
-  2. 写入 undo log（旧值，用于回滚和 MVCC）
-  3. 修改 Buffer Pool 中的数据页（变脏页）
-  4. 写入 redo log（prepare 状态）
-  5. 执行器写入 binlog
-  6. 引擎提交 redo log（commit 状态）→ 事务完成
-  7. 后台线程异步将脏页刷回磁盘（刷脏）
+```mermaid
+graph LR
+    A[执行器调用引擎] --> B[1. 从 Buffer Pool 读取数据页<br/>不在则从磁盘加载]
+    B --> C[2. 写入 undo log<br/>旧值，用于回滚和 MVCC]
+    C --> D[3. 修改 Buffer Pool 中的数据页<br/>变脏页]
+    D --> E[4. 写入 redo log<br/>prepare 状态]
+    E --> F[5. 执行器写入 binlog]
+    F --> G[6. 引擎提交 redo log<br/>commit 状态 → 事务完成]
+    G --> H[7. 后台线程异步将脏页刷回磁盘<br/>刷脏]
 ```
 
 > ⚠️ 易错点：① 很多资料说"MySQL 架构分三层"或列出的组件不全。标准分层是 Server 层 + 存储引擎层两层。② 查询缓存 MySQL 8.0 已彻底移除，面试时需注明版本差异。③ 数据修改不是直接写磁盘，而是先写 Buffer Pool 再由后台刷脏，这是 WAL（Write-Ahead Logging）机制的体现。
@@ -185,37 +189,51 @@ MySQL 是 Oracle 旗下开源免费的关系型数据库管理系统（RDBMS）�
 
 **B+ 树结构示意图（3 阶 B+ 树示例）：**
 
-```
-                      ┌──────────┐
-                      │   [20]   │          ← 根节点（内部节点，只存键）
-                      └────┬─────┘
-                           │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-       ┌──────────┐             ┌──────────┐
-       │ [10, 15] │             │ [25, 30] │   ← 内部节点（只存键）
-       └────┬─────┘             └────┬─────┘
-            │                        │
-    ┌───────┴───────┐          ┌─────┴───────┐
-    ▼               ▼          ▼             ▼
-┌────────┐  ┌────────┐  ┌────────┐  ┌────────┐
-│ 5, 8,10│→│10,12,15│→│20,22,25│→│25,28,30│  ← 叶子节点（存键+数据，链表串联）
-└────────┘  └────────┘  └────────┘  └────────┘
+```mermaid
+graph TD
+    subgraph bplus["B+ 树结构（3 阶示例）"]
+        direction TD
+
+        Root["[20]<br/><span style='font-size:12px'>根节点（内部节点，只存键）</span>"]
+
+        N1["[10, 15]<br/><span style='font-size:12px'>内部节点（只存键）</span>"]
+        N2["[25, 30]<br/><span style='font-size:12px'>内部节点（只存键）</span>"]
+
+        L1["5, 8, 10"]
+        L2["10, 12, 15"]
+        L3["20, 22, 25"]
+        L4["25, 28, 30"]
+
+        LeafNote["叶子节点：存键+数据，用双向链表串联"]
+
+        Root --> N1
+        Root --> N2
+        N1 --> L1
+        N1 --> L2
+        N2 --> L3
+        N2 --> L4
+
+        L1 --- L2
+        L2 --- L3
+        L3 --- L4
+    end
 ```
 
 **B 树结构对比：**
 
-```
-                ┌──────────┐
-                │   [20]   │           ← 内部节点存键 + 数据指针
-                └────┬─────┘
-                     │
-        ┌────────────┴────────────┐
-        ▼                         ▼
- ┌──────────────┐         ┌──────────────┐
- │  [10]  [15]  │         │  [25]  [30]  │  ← 内部节点也存数据
- │  数据  数据  │         │  数据  数据  │
- └──────────────┘         └──────────────┘
+```mermaid
+graph TD
+    subgraph btree["B 树结构"]
+        Root["[20]<br/><span style='font-size:12px'>内部节点存键 + 数据指针</span>"]
+
+        N1["[10]&nbsp;&nbsp;&nbsp;[15]<br/>数据&nbsp;&nbsp;&nbsp;数据"]
+        N2["[25]&nbsp;&nbsp;&nbsp;[30]<br/>数据&nbsp;&nbsp;&nbsp;数据"]
+
+        Note["内部节点也存数据"]
+
+        Root --> N1
+        Root --> N2
+    end
 ```
 
 **B 树与 B+ 树的核心区别：**
@@ -290,24 +308,29 @@ MySQL 是 Oracle 旗下开源免费的关系型数据库管理系统（RDBMS）�
 
 **结构对比图：**
 
-```
-【InnoDB 聚簇索引（主键索引）】
-  索引键 ──→ 叶子节点存【完整行数据】
-  （主键 B+ 树）
+```mermaid
+graph TD
+    subgraph cluster_pk["InnoDB 聚簇索引（主键索引）"]
+        PK1["索引键（主键 B+ 树）"]
+        PK2["叶子节点存【完整行数据】"]
+        PK1 --> PK2
+    end
 
-【InnoDB 非聚簇索引（二级索引）】
-  索引键 ──→ 叶子节点存【索引列值 + 主键值】
-  （二级索引 B+ 树）
-            │
-            ▼ 回表
-  【聚簇索引 B+ 树】→ 拿到完整行数据
+    subgraph cluster_sec["InnoDB 非聚簇索引（二级索引）"]
+        Sec1["索引键（二级索引 B+ 树）"]
+        Sec2["叶子节点存【索引列值 + 主键值】"]
+        Sec1 --> Sec2
+    end
 
-【MyISAM 非聚簇索引】
-  索引键 ──→ 叶子节点存【数据行的物理地址指针】
-  （索引文件 .MYI）
-            │
-            ▼
-  【数据文件 .MYD】→ 直接定位到行
+    subgraph cluster_myisam["MyISAM 非聚簇索引"]
+        MY1["索引键（索引文件 .MYI）"]
+        MY2["叶子节点存【数据行的物理地址指针】"]
+        MY3["数据文件 .MYD → 直接定位到行"]
+        MY1 --> MY2
+        MY2 --> MY3
+    end
+
+    Sec2 -->|"回表"| PK2
 ```
 
 **MyISAM vs InnoDB 索引对比：**
@@ -359,20 +382,24 @@ SELECT name, age, email FROM user WHERE name = 'Tom';
 
 **联合索引 B+ 树结构示意（idx(a, b, c)）：**
 
+```mermaid
+mindmap
+  root((a=1))
+    b=2
+      c=3
+      c=4
+    b=5
+      c=6
+      c=7
 ```
-索引按 a → b → c 的顺序排序：
 
-         a=1
-        /    \
-    b=2      b=5
-    / \      / \
- c=3 c=4  c=6 c=7
+查询匹配规则（索引按 `a → b → c` 排序）：
 
-查询时：
-- WHERE a=1 AND b=2 AND c=3  → 全部用到（a匹配→b匹配→c匹配）
-- WHERE a=1 AND c=3          → 只用到 a（b 断了，c 没法定位）
-- WHERE b=2 AND c=3          → 完全用不到（没有最左列 a）
-```
+| WHERE 条件 | 索引用到的字段 |
+|-----------|--------------|
+| `a=1 AND b=2 AND c=3` | 全部用到（a匹配→b匹配→c匹配） |
+| `a=1 AND c=3` | 只用到 a（b 断了，c 没法定位） |
+| `b=2 AND c=3` | 完全用不到（没有最左列 a） |
 
 以 `idx(a, b, c)` 为例的完整匹配情况：
 
@@ -395,17 +422,24 @@ MySQL 5.6 引入的优化。在索引遍历过程中，对索引中包含的字�
 
 **示意图：**
 
-```
-【没有 ICP 时】
-  存储引擎 → 按 name='张%' 在索引中找到所有匹配行
-           → 每条都回表查完整数据（回表 N 次）
-           → Server 层再判断 age=20 的条件
+```mermaid
+graph TD
+    subgraph no_icp["没有 ICP 时"]
+        direction TB
+        N1["存储引擎：按 name='张%' 在索引中找到所有匹配行"]
+        N2["每条都回表查完整数据（回表 N 次）"]
+        N3["Server 层再判断 age=20 的条件"]
+        N1 --> N2 --> N3
+    end
 
-【有 ICP 时】
-  存储引擎 → 按 name='张%' 在索引中找到匹配行
-           → 在索引中就判断 age=20（因为 age 也在索引里）
-           → 只把满足条件的行回表（回表 M 次，M << N）
-           → Server 层直接返回
+    subgraph with_icp["有 ICP 时"]
+        direction TB
+        Y1["存储引擎：按 name='张%' 在索引中找到匹配行"]
+        Y2["在索引中就判断 age=20（因为 age 也在索引里）"]
+        Y3["只把满足条件的行回表（回表 M 次，M << N）"]
+        Y4["Server 层直接返回"]
+        Y1 --> Y2 --> Y3 --> Y4
+    end
 ```
 
 **示例**：联合索引 `idx(name, age)`，查询 `WHERE name LIKE '张%' AND age = 20`
@@ -518,17 +552,20 @@ FROM user;
 
 当向 B+ 树的叶子节点插入新数据时，如果该页已经满了（16KB 放不下了），就需要把这一页分成两页，这个过程叫页分裂。
 
-```
-插入前（页已满）：
-┌────────────────────────┐
-│ [1][2][3]...[255][256] │  ← 页已满
-└────────────────────────┘
+```mermaid
+graph LR
+    subgraph before_split["插入前（页已满）"]
+        FullPage["[1][2][3]...[255][256]"]
+        FullNote["页已满"]
+    end
 
-插入 128 后，页分裂：
-┌─────────────────┐  ┌────────────────────┐
-│ [1][2]...[128]  │→│ [129][130]...[256] │  ← 分成两页
-└─────────────────┘  └────────────────────┘
-  前 50%              后 50%
+    subgraph after_split["插入 128 后，页分裂"]
+        LeftPage["[1][2]...[128]"]
+        RightPage["[129][130]...[256]"]
+        LeftNote["前 50%"]
+        RightNote["后 50%"]
+        LeftPage --> RightPage
+    end
 ```
 
 **页分裂的代价：**
@@ -541,16 +578,19 @@ FROM user;
 
 当删除数据时，相邻两个页的数据量都很少（低于 `MERGE_THRESHOLD`，默认 50%），InnoDB 会尝试把它们合并成一个页。
 
-```
-删除后两个页都很空：
-┌──────────────┐  ┌──────────────┐
-│ [1][3][5]    │→│ [7][9][11]   │  ← 都远低于 50%
-└──────────────┘  └──────────────┘
+```mermaid
+graph LR
+    subgraph before_merge["删除后两个页都很空"]
+        P1["[1][3][5]"]
+        P2["[7][9][11]"]
+        P1 --> P2
+        Note1["都远低于 50%"]
+    end
 
-合并后：
-┌──────────────────────────┐
-│ [1][3][5][7][9][11]      │  ← 合并为一页
-└──────────────────────────┘
+    subgraph after_merge["合并后"]
+        M1["[1][3][5][7][9][11]"]
+        Note2["合并为一页"]
+    end
 ```
 
 **为什么自增主键写入性能好？**
@@ -705,17 +745,16 @@ SQL 标准定义了 4 种隔离级别，由低到高：
 
 InnoDB 的每行数据除了业务字段，还隐含三个字段：
 
-```
-┌──────────────────────────────────────┐
-│          数据行（InnoDB 行格式）       │
-├──────────────────────────────────────┤
-│  业务字段 1, 业务字段 2, ...           │
-│  ...                                  │
-├──────────────────────────────────────┤
-│  DB_TRX_ID  (6字节)  ← 最后修改该行的事务ID  │
-│  DB_ROLL_PTR(7字节)  ← 指向 undo log 的回滚指针 │
-│  DB_ROW_ID  (6字节)  ← 隐式主键（没有主键时才有）│
-└──────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph row["数据行（InnoDB 行格式）"]
+        direction TB
+        Biz["业务字段 1, 业务字段 2, ..."]
+        TrxId["DB_TRX_ID（6字节）<br/>最后修改该行的事务 ID"]
+        RollPtr["DB_ROLL_PTR（7字节）<br/>指向 undo log 的回滚指针"]
+        RowId["DB_ROW_ID（6字节）<br/>隐式主键（没有主键时才有）"]
+        Biz --> TrxId --> RollPtr --> RowId
+    end
 ```
 
 - `DB_TRX_ID`（6字节）：最后一次修改（insert/update/delete）该行的事务 ID
@@ -728,19 +767,16 @@ InnoDB 的每行数据除了业务字段，还隐含三个字段：
 
 **版本链示意图：**
 
-```
-当前行（最新版本）
-  │
-  │ DB_ROLL_PTR
-  ▼
-undo log 版本 1（上一个版本）
-  │
-  │ roll_pointer
-  ▼
-undo log 版本 2（更早的版本）
-  │
-  ▼
-  ...
+```mermaid
+graph TD
+    A["当前行（最新版本）"]
+    B["undo log 版本 1（上一个版本）"]
+    C["undo log 版本 2（更早的版本）"]
+    D["..."]
+
+    A -->|"DB_ROLL_PTR"| B
+    B -->|"roll_pointer"| C
+    C --> D
 ```
 
 每次事务修改数据：把旧值写入 undo log → 修改当前行的 DB_TRX_ID 和 DB_ROLL_PTR → 指向新的 undo log 节点
@@ -758,16 +794,14 @@ undo log 版本 2（更早的版本）
 
 **可见性判断规则（从当前版本沿着版本链往前找）：**
 
-```
-版本的 trx_id < min_trx_id？
-   ├─ 是 → ✅ 可见（这个事务早就提交了）
-   └─ 否 →
-         版本的 trx_id >= max_trx_id？
-             ├─ 是 → ❌ 不可见（ReadView 生成后才启动的事务）
-             └─ 否 →
-                   版本的 trx_id 在 m_ids 列表中吗？
-                       ├─ 在 → ❌ 不可见（这个事务还活跃着，未提交）
-                       └─ 不在 → ✅ 可见（已经提交了）
+```mermaid
+flowchart TD
+    A[版本的 trx_id < min_trx_id？] -->|是| B[✅ 可见<br/>这个事务早就提交了]
+    A -->|否| C[版本的 trx_id >= max_trx_id？]
+    C -->|是| D[❌ 不可见<br/>ReadView 生成后才启动的事务]
+    C -->|否| E[版本的 trx_id 在 m_ids 列表中吗？]
+    E -->|在| F[❌ 不可见<br/>这个事务还活跃着，未提交]
+    E -->|不在| G[✅ 可见<br/>已经提交了]
 ```
 
 简单理解：**比 ReadView 创建时所有活跃事务都早的版本可见，晚的不可见。**
@@ -802,27 +836,25 @@ undo log 版本 2（更早的版本）
 
 **关键注意点：快照读和当前读混用可能出现"幻读"现象**
 
-```
-示例（RR 隔离级别）：
+```mermaid
+sequenceDiagram
+    participant A as 事务 A
+    participant B as 事务 B
 
-事务 A                              事务 B
-  │
-  ├─ BEGIN;
-  ├─ SELECT * FROM t WHERE id > 10;  -- 快照读，得到 5 条
-  │                                   │
-  │                                   ├─ BEGIN;
-  │                                   ├─ INSERT INTO t VALUES(11, 'x');
-  │                                   ├─ COMMIT;
-  │
-  ├─ SELECT * FROM t WHERE id > 10;  -- 快照读，还是 5 条（ReadView 没变，没问题）
-  │
-  ├─ UPDATE t SET name='y' WHERE id=11;  -- 当前读！居然更新成功了！
-  │                                     -- 刚才快照读还说没有 id=11 的行
-  │
-  ├─ SELECT * FROM t WHERE id > 10;  -- 快照读，变成 6 条了！
-  │                                  -- （因为自己更新了，版本链中加入了自己的修改）
-  ▼
-  这就是"幻读"现象——虽然 RR 基本解决了幻读，但在混用场景下仍可能出现
+    Note over A: BEGIN;
+    A->>A: SELECT * FROM t WHERE id > 10;<br/>快照读，得到 5 条
+
+    Note over B: BEGIN;
+    B->>B: INSERT INTO t VALUES(11, 'x');
+    Note over B: COMMIT;
+
+    A->>A: SELECT * FROM t WHERE id > 10;<br/>快照读，还是 5 条（ReadView 没变）
+
+    A->>A: UPDATE t SET name='y' WHERE id=11;<br/>当前读！居然更新成功了！<br/>刚才快照读还说没有 id=11 的行
+
+    A->>A: SELECT * FROM t WHERE id > 10;<br/>快照读，变成 6 条了！<br/>（自己更新了，版本链中加入了自己的修改）
+
+    Note over A: 这就是"幻读"现象——<br/>虽然 RR 基本解决了幻读，<br/>但在快照读+当前读混用场景下仍可能出现
 ```
 
 **总结（标准答案）：**
@@ -885,25 +917,35 @@ InnoDB 行锁是**基于索引**实现的。具体来说，是通过给索引上
 
 **加锁过程：**
 
-```
-主键索引（聚簇索引）加锁：
-  SELECT * FROM user WHERE id = 10 FOR UPDATE;
-  → 在主键索引树上找到 id=10 的记录
-  → 给该记录加 X 锁（Record Lock）
+```mermaid
+graph TD
+    subgraph pk_lock["主键索引（聚簇索引）加锁"]
+        direction TB
+        PK1["SELECT * FROM user WHERE id = 10 FOR UPDATE"]
+        PK2["在主键索引树上找到 id=10 的记录"]
+        PK3["给该记录加 X 锁（Record Lock）"]
+        PK1 --> PK2 --> PK3
+    end
 
-二级索引加锁：
-  SELECT * FROM user WHERE name = 'Tom' FOR UPDATE;
-  → 在二级索引 idx_name 上找到 name='Tom' 的记录
-  → 给二级索引记录加 X 锁
-  → 再根据主键值回主键索引，给主键索引记录也加 X 锁
-  → （两把锁都要加）
+    subgraph sec_lock["二级索引加锁"]
+        direction TB
+        S1["SELECT * FROM user WHERE name = 'Tom' FOR UPDATE"]
+        S2["在二级索引 idx_name 上找到 name='Tom' 的记录"]
+        S3["给二级索引记录加 X 锁"]
+        S4["再根据主键值回主键索引，给主键索引记录也加 X 锁"]
+        S5["两把锁都要加"]
+        S1 --> S2 --> S3 --> S4 --> S5
+    end
 
-不走索引：
-  SELECT * FROM user WHERE age = 20 FOR UPDATE;  -- age 没有索引
-  → InnoDB 无法定位具体行
-  → 扫描全表，给每一行记录都加 Record Lock
-  → 同时所有间隙都加 Gap Lock（相当于锁全表）
-  → 严重影响并发
+    subgraph no_idx_lock["不走索引（相当于锁全表）"]
+        direction TB
+        N1["SELECT * FROM user WHERE age = 20 FOR UPDATE<br/>age 没有索引"]
+        N2["InnoDB 无法定位具体行"]
+        N3["扫描全表，给每一行记录都加 Record Lock"]
+        N4["同时所有间隙都加 Gap Lock（相当于锁全表）"]
+        N5["严重影响并发"]
+        N1 --> N2 --> N3 --> N4 --> N5
+    end
 ```
 
 > ⚠️ 易错点：很多人说"InnoDB 支持行锁所以并发高"，但有前提——必须用到索引。没有索引的更新操作，InnoDB 实际上是表锁，并发性能还不如 MyISAM。
@@ -921,11 +963,27 @@ InnoDB 行锁是**基于索引**实现的。具体来说，是通过给索引上
 
 假设有一个表，id 是主键，已有记录：10, 20, 30, 40, 50
 
+```mermaid
+graph LR
+    G1["(-∞, 10)"] --> R1["10"]
+    R1 --> G2["(10, 20)"]
+    G2 --> R2["20"]
+    R2 --> G3["(20, 30)"]
+    G3 --> R3["30"]
+    R3 --> G4["(30, 40)"]
+    G4 --> R4["40"]
+    R4 --> G5["(40, 50)"]
+    G5 --> R5["50"]
+    R5 --> G6["(50, +∞)"]
+
+    style R1 fill:#ffcc80
+    style R2 fill:#ffcc80
+    style R3 fill:#ffcc80
+    style R4 fill:#ffcc80
+    style R5 fill:#ffcc80
 ```
-索引记录：  10    20    30    40    50
-          ←───→←───→←───→←───→←───→←───→
-间隙：  (-∞,10) (10,20) (20,30) (30,40) (40,50) (50,+∞)
-```
+
+索引记录（橙色）与间隙（白色）示意：记录之间的空隙就是间隙，Next-Key Lock 锁住「记录 + 左边间隙」。
 
 | 查询语句 | 加锁类型 | 锁定范围 |
 |---------|---------|---------|
@@ -985,21 +1043,19 @@ WHERE id = 1 AND version = 3;
 4. **循环等待**：事务之间形成头尾相接的循环等待链
 
 **死锁示例：**
-```
-事务 A                              事务 B
-  │                                   │
-  ├─ BEGIN;                          ├─ BEGIN;
-  ├─ UPDATE t SET ... WHERE id=1;    │
-  │   （持有 id=1 的行锁）             │
-  │                                   ├─ UPDATE t SET ... WHERE id=2;
-  │                                   │   （持有 id=2 的行锁）
-  │                                   │
-  ├─ UPDATE t SET ... WHERE id=2;    │
-  │   （等待 id=2 的锁）               │
-  │                                   ├─ UPDATE t SET ... WHERE id=1;
-  │                                   │   （等待 id=1 的锁）
-  ▼                                   ▼
-         死锁：互相等对方持有的锁
+```mermaid
+sequenceDiagram
+    participant A as 事务 A
+    participant B as 事务 B
+
+    Note over A,B: BEGIN
+    A->>A: UPDATE t SET ... WHERE id=1<br/>持有 id=1 的行锁
+    B->>B: UPDATE t SET ... WHERE id=2<br/>持有 id=2 的行锁
+
+    A->>B: UPDATE t SET ... WHERE id=2<br/>等待 id=2 的锁
+    B->>A: UPDATE t SET ... WHERE id=1<br/>等待 id=1 的锁
+
+    Note over A,B: 💀 死锁：互相等待对方持有的锁
 ```
 
 **排查方式：**
@@ -1053,21 +1109,18 @@ WHERE id = 1 AND version = 3;
 - **加锁范围**：Gap Lock 是**开区间 (a, b)**，Next-Key Lock 是**左开右闭 (a, b]**
 
 **间隙锁导致死锁的经典案例：**
-```
-事务 A                              事务 B
-  │                                   │
-  ├─ SELECT * FROM t WHERE id=15 FOR UPDATE;
-  │   -- id=15 不存在
-  │   -- 加了 (10, 20) 间隙锁
-  │                                   ├─ SELECT * FROM t WHERE id=15 FOR UPDATE;
-  │                                   │   -- 也加了 (10, 20) 间隙锁（间隙锁兼容，成功）
-  │                                   │
-  ├─ INSERT INTO t VALUES(15, ...);   │
-  │   -- 等待 B 的间隙锁               │
-  │                                   ├─ INSERT INTO t VALUES(15, ...);
-  │                                   │   -- 等待 A 的间隙锁
-  ▼                                   ▼
-                  死锁
+```mermaid
+sequenceDiagram
+    participant A as 事务 A
+    participant B as 事务 B
+
+    A->>A: SELECT * FROM t WHERE id=15 FOR UPDATE<br/>id=15 不存在<br/>加了 (10, 20) 间隙锁
+    B->>B: SELECT * FROM t WHERE id=15 FOR UPDATE<br/>也加了 (10, 20) 间隙锁<br/>间隙锁兼容，成功
+
+    A->>B: INSERT INTO t VALUES(15, ...)<br/>等待 B 的间隙锁
+    B->>A: INSERT INTO t VALUES(15, ...)<br/>等待 A 的间隙锁
+
+    Note over A,B: 💀 死锁（间隙锁之间兼容，但都互斥插入操作）
 ```
 
 > ⚠️ 易错点：间隙锁之间是**兼容的（不互斥）**，它们互斥的是"插入操作"。很多资料误以为间隙锁之间也会冲突，这是错误的。
@@ -1113,20 +1166,22 @@ WHERE id = 1 AND version = 3;
 
 **redo log 的写入过程（简化版）：**
 
-```
-内存                           磁盘
-│                               │
-│  Buffer Pool 数据页（变脏）    │
-│       │                       │
-│       ▼                       │
-│  redo log buffer（内存）      │
-│       │  事务提交时刷盘        │
-│       ▼                       │
-│  ──────────────────────────▶  │  redo log file（磁盘，循环写）
-│                               │
-│  后台刷脏线程（异步）          │
-│  ──────────────────────────▶  │  数据文件（磁盘）
-│                               │
+```mermaid
+graph LR
+    subgraph mem["内存"]
+        BP["Buffer Pool 数据页（变脏）"]
+        RLB["redo log buffer（内存）"]
+        FlushThread["后台刷脏线程（异步）"]
+    end
+
+    subgraph disk["磁盘"]
+        RLF["redo log file<br/>循环写"]
+        DataFile["数据文件"]
+    end
+
+    BP --> RLB
+    RLB -->|"事务提交时刷盘"| RLF
+    BP -->|"异步刷脏"| DataFile
 ```
 
 **redo log 是循环写的：**
@@ -1191,37 +1246,14 @@ WHERE id = 1 AND version = 3;
 
 **两阶段提交流程图：**
 
-```
-事务提交过程：
-    │
-    ▼
-┌───────────┐
-│ 修改数据页 │ ← Buffer Pool 中修改
-│ 写 undo   │
-└─────┬─────┘
-      │
-      ▼
-┌─────────────────┐
-│  第一阶段：Prepare │
-│  InnoDB 写入 redo log │
-│  标记为 prepare 状态 │ ← 事务状态：准备提交
-└─────────┬───────┘
-          │
-          ▼
-┌─────────────────┐
-│  Server 层写入   │
-│  binlog 并刷盘   │ ← binlog 落盘成功
-└─────────┬───────┘
-          │
-          ▼
-┌─────────────────┐
-│  第二阶段：Commit  │
-│  InnoDB 将 redo  │
-│  log 标记为 commit│ ← 事务状态：已提交
-└─────────┬───────┘
-          │
-          ▼
-      事务完成
+```mermaid
+graph TD
+    S["事务提交过程"]
+    --> A["修改数据页 + 写 undo<br/>Buffer Pool 中修改"]
+    --> B["第一阶段：Prepare<br/>InnoDB 写入 redo log，标记为 prepare 状态<br/>事务状态：准备提交"]
+    --> C["Server 层写入 binlog 并刷盘<br/>binlog 落盘成功"]
+    --> D["第二阶段：Commit<br/>InnoDB 将 redo log 标记为 commit<br/>事务状态：已提交"]
+    --> E["事务完成"]
 ```
 
 **崩溃恢复逻辑（如何判断事务该提交还是回滚）：**
@@ -1311,27 +1343,29 @@ WHERE id = 1 AND version = 3;
 
 **Buffer Pool 内存结构示意图：**
 
-```
-Buffer Pool（内存，128MB 起，可配置）
-┌──────────────────────────────────────────────────────────┐
-│                                                          │
-│  一堆数据页（默认每 16KB，和磁盘页一一对应）               │
-│  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐        ┌────┐       │
-│  │页1 │ │页2 │ │页3 │ │页4 │ │页5 │  ...   │页N │       │
-│  └────┘ └────┘ └────┘ └────┘ └────┘        └────┘       │
-│                                                          │
-│  通过链表管理：                                            │
-│  ┌──────────────────────────────────────────────┐        │
-│  │  Free List（空闲页链表）                       │        │
-│  └──────────────────────────────────────────────┘        │
-│  ┌──────────────────────────────────────────────┐        │
-│  │  LRU List（缓存页链表，冷热数据管理）            │        │
-│  └──────────────────────────────────────────────┘        │
-│  ┌──────────────────────────────────────────────┐        │
-│  │  Flush List（脏页链表，需要刷回磁盘的页）        │        │
-│  └──────────────────────────────────────────────┘        │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph BP["Buffer Pool（内存，128MB 起，可配置）"]
+        direction TB
+
+        subgraph Pages["数据页（默认每 16KB，和磁盘页一一对应）"]
+            direction LR
+            P1["页1"]
+            P2["页2"]
+            P3["页3"]
+            P4["页4"]
+            P5["页5"]
+            PN["页N"]
+            Dots["..."]
+        end
+
+        subgraph Lists["通过链表管理"]
+            direction TB
+            Free["Free List<br/>空闲页链表"]
+            LRU["LRU List<br/>缓存页链表，冷热数据管理"]
+            Flush["Flush List<br/>脏页链表，需要刷回磁盘的页"]
+        end
+    end
 ```
 
 **三个核心链表：**
@@ -1356,12 +1390,21 @@ Buffer Pool（内存，128MB 起，可配置）
 - **young 区（热数据区）**：占 5/8（`innodb_old_blocks_pct` 控制，默认 37%，即 old 区占 37%）
 - **old 区（冷数据区）**：占 3/8
 
-```
-        young 区（热数据）              old 区（冷数据）
-   ┌───────────────────────┬───────────────────────────┐
-   │  head ←── 经常访问 ──→│←── 新数据从这里插入 ──→ tail │
-   └───────────────────────┴───────────────────────────┘
-                              midpoint（约 5/8 位置）
+```mermaid
+graph LR
+    subgraph LRU["改进的 LRU List（Midpoint Insertion）"]
+        direction LR
+        H[head]
+        subgraph young["young 区（热数据，占 5/8）"]
+            Y1["经常访问的页"]
+        end
+        subgraph old["old 区（冷数据，占 3/8）"]
+            O1["新数据从这里插入"]
+        end
+        T[tail]
+        H --- Y1 --- O1 --- T
+        MP["midpoint（约 5/8 位置）"]
+    end
 ```
 
 **改进的规则：**
@@ -1696,12 +1739,13 @@ FROM order WHERE user_id = 123 AND status = 1 ORDER BY create_time DESC LIMIT 10
 
 **InnoDB 逻辑存储结构图：**
 
-```
-表空间 (Tablespace)
-  └── 段 (Segment)        ← 数据段、索引段、回滚段等
-       └── 区 (Extent)    ← 连续的 64 个页，1MB（64 × 16KB）
-            └── 页 (Page)  ← 最小 I/O 单元，默认 16KB
-                 └── 行 (Row)
+```mermaid
+graph TD
+    A["表空间 (Tablespace)"]
+    --> B["段 (Segment)<br/>数据段、索引段、回滚段等"]
+    --> C["区 (Extent)<br/>连续的 64 个页，1MB（64 × 16KB）"]
+    --> D["页 (Page)<br/>最小 I/O 单元，默认 16KB"]
+    --> E["行 (Row)"]
 ```
 
 **各层级详解：**
@@ -1729,24 +1773,26 @@ FROM order WHERE user_id = 123 AND status = 1 ORDER BY create_time DESC LIMIT 10
 
 **主从复制架构图：**
 
-```
-┌─────────────────┐                      ┌──────────────────┐
-│    主库 Master   │                      │    从库 Slave     │
-│                 │                      │                  │
-│  客户端写操作 →  │                      │                  │
-│       ↓         │                      │                  │
-│   写入 binlog   │                      │                  │
-│       │         │                      │                  │
-│       ▼         │                      │                  │
-│ Binlog Dump线程  │ ──── binlog 传输 ──▶│  I/O 线程        │
-│                 │                      │       ↓          │
-│                 │                      │   relay log      │
-│                 │                      │       ↓          │
-│                 │                      │  SQL 线程        │
-│                 │                      │       ↓          │
-│                 │                      │   从库数据        │
-│                 │                      │                  │
-└─────────────────┘                      └──────────────────┘
+```mermaid
+graph LR
+    subgraph Master["主库 Master"]
+        direction TB
+        M1["客户端写操作"]
+        M2["写入 binlog"]
+        M3["Binlog Dump 线程"]
+        M1 --> M2 --> M3
+    end
+
+    subgraph Slave["从库 Slave"]
+        direction TB
+        S1["I/O 线程"]
+        S2["relay log"]
+        S3["SQL 线程"]
+        S4["从库数据"]
+        S1 --> S2 --> S3 --> S4
+    end
+
+    M3 -->|"binlog 传输"| S1
 ```
 
 **三个关键线程：**

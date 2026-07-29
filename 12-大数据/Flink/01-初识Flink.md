@@ -35,34 +35,28 @@ Flink 世界观：**万物皆流**，批是流的特例。
 
 Lambda 架构由 Nathan Marz 提出，核心思想是「批处理 + 流处理」双管齐下：批层保准确性、速度层保低延迟、服务层合并结果对外查询。
 
-```
-                          ┌───────────────────────────┐
-                          │      Query / 业务查询       │
-                          └─────────────┬─────────────┘
-                                        │
-                          ┌─────────────┴─────────────┐
-                          │       Serving Layer        │
-                          │   (Druid / HBase / Redis)  │
-                          │  合并 批视图 + 实时视图        │
-                          └─────────────┬─────────────┘
-                                        │
-                    ┌───────────────────┴───────────────────┐
-                    │                                       │
-              批视图 Batch View                       实时视图 Realtime View
-                    │                                       │
-          ┌─────────┴─────────┐                   ┌─────────┴─────────┐
-          │   Batch Layer     │                   │   Speed Layer     │
-          │  (MapReduce/Spark)│                   │  (Storm/Flink)    │
-          │  全量重算, 准确     │                   │  增量计算, 低延迟   │
-          │  延迟: 分钟~小时    │                   │  延迟: 毫秒~秒     │
-          └─────────┬─────────┘                   └─────────┬─────────┘
-                    │                                       │
-                    └──────────────────┬────────────────────┘
-                                       │
-                              ┌────────┴────────┐
-                              │   Data Source   │
-                              │  (Kafka / 日志)  │
-                              └─────────────────┘
+```mermaid
+graph TB
+    query["Query / 业务查询"]
+    subgraph serving["Serving Layer 服务层"]
+        serving_node["Druid / HBase / Redis<br/>合并 批视图 + 实时视图"]
+    end
+    batch_view["批视图 Batch View"]
+    realtime_view["实时视图 Realtime View"]
+    subgraph batch_layer["Batch Layer 批处理层"]
+        batch_node["MapReduce / Spark<br/>全量重算, 准确<br/>延迟: 分钟~小时"]
+    end
+    subgraph speed_layer["Speed Layer 速度层"]
+        speed_node["Storm / Flink<br/>增量计算, 低延迟<br/>延迟: 毫秒~秒"]
+    end
+    source["Data Source 数据源<br/>(Kafka / 日志)"]
+    query --> serving
+    serving --> batch_view
+    serving --> realtime_view
+    batch_view --> batch_layer
+    realtime_view --> speed_layer
+    batch_layer --> source
+    speed_layer --> source
 ```
 
 三层职责：
@@ -96,14 +90,12 @@ Lambda 架构由 Nathan Marz 提出，核心思想是「批处理 + 流处理」
 
 **分层 API（从下到上）**
 
-```
-Process Function（最底层，有状态流，嵌在 DataStream API 中）
-   ↑
-DataStream API（核心，流批统一）   DataSet API（已软弃用⚠️）
-   ↑
-Table API（声明式，关系模型，有优化器）
-   ↑
-SQL（最高层抽象）
+```mermaid
+graph BT
+    pf["Process Function<br/>（最底层，有状态流，嵌在 DataStream API 中）"] --> ds["DataStream API<br/>（核心，流批统一）"]
+    ds --> table["Table API<br/>（声明式，关系模型，有优化器）"]
+    table --> sql["SQL<br/>（最高层抽象）"]
+    dataset["DataSet API<br/>（已软弃用⚠️）"] --> table
 ```
 
 ⚠️ 资料仍以 DataSet API 教批处理，但 **Flink 1.12+ 起 DataSet 处于 soft deprecated**，推荐 DataStream API 一套代码处理流和批。

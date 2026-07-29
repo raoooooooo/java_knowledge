@@ -55,11 +55,11 @@
 ### 1.4 Docker 架构
 
 **Client-Server 架构**
-```
-Docker Client (CLI/API) → Docker Daemon → Container Runtime (runc)
-                                              ↓
-                                          Linux Kernel
-                                          (Namespaces + Cgroups)
+```mermaid
+graph LR
+    client["Docker Client<br/>（CLI / API）"] --> daemon["Docker Daemon"]
+    daemon --> runtime["Container Runtime<br/>（containerd / runc）"]
+    runtime --> kernel["Linux Kernel<br/>（Namespaces + Cgroups）"]
 ```
 
 **主要组件：**

@@ -50,10 +50,11 @@ Table API 和 SQL 是 Flink 顶层"声明式"应用 API，位于 DataStream API 
 **持续查询（Continuous Query）**：对动态表的查询永不停止，每来一条数据就更新结果，结果本身也是一个动态表。
 
 **三步闭环**（重要）：
-```
-流(Stream) -> ① 转换为 -> 动态表(Dynamic Table)
-            -> ② 持续查询(Continuous Query) -> 新的动态表
-            -> ③ 转换回 -> 流(Stream)
+```mermaid
+graph LR
+    stream1["流 Stream"] -- "① 转换为" --> table1["动态表 Dynamic Table"]
+    table1 -- "② 持续查询 Continuous Query" --> table2["新的动态表"]
+    table2 -- "③ 转换回" --> stream2["流 Stream"]
 ```
 
 **两类持续查询**：

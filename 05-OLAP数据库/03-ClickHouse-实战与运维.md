@@ -59,8 +59,13 @@ SETTINGS
 
 #### 架构图
 
-```
-应用输出日志 → Filebeat → Kafka → ClickHouse Kafka引擎 → 物化视图 → 日志表
+```mermaid
+graph LR
+    app["应用输出日志"] --> filebeat["Filebeat"]
+    filebeat --> kafka["Kafka"]
+    kafka --> engine["ClickHouse Kafka引擎"]
+    engine --> mv["物化视图"]
+    mv --> table["日志表"]
 ```
 
 #### 步骤1：创建 Kafka 消费表
@@ -135,10 +140,11 @@ GRANULARITY 1;
 
 #### 冷热分离架构
 
-```
-热数据（7天内）→ SSD 高性能盘 → 快速查询
-温数据（7-30天）→ SATA 大容量盘 → 偶尔查询
-冷数据（30天以上）→ 对象存储S3 → 归档（可选）
+```mermaid
+graph LR
+    hot["热数据（7天内）"] --> ssd["SSD 高性能盘"] --> hot_q["快速查询"]
+    warm["温数据（7-30天）"] --> sata["SATA 大容量盘"] --> warm_q["偶尔查询"]
+    cold["冷数据（30天以上）"] --> s3["对象存储S3"] --> archive["归档（可选）"]
 ```
 
 #### 实现方式：TTL + 移动分区
@@ -260,14 +266,11 @@ ORDER BY ts;
 
 ### 2.4 多层聚合架构
 
-```
-原始指标（10秒粒度）
-      ↓ MV聚合
-分钟级聚合（6倍压缩）
-      ↓ MV聚合
-小时级聚合（60倍压缩）
-      ↓ MV聚合
-天级聚合（24倍压缩）
+```mermaid
+graph TB
+    raw["原始指标（10秒粒度）"] -->|"MV聚合"| minute["分钟级聚合（6倍压缩）"]
+    minute -->|"MV聚合"| hour["小时级聚合（60倍压缩）"]
+    hour -->|"MV聚合"| day["天级聚合（24倍压缩）"]
 ```
 
 **查询路由：**

@@ -27,19 +27,29 @@
 
 K8s 集群由**控制平面（Master）**和**工作节点（Worker Node）**两部分组成。
 
-```
-        ┌──────────────── 控制平面 (Master) ─────────────────┐
-        │   kube-apiserver  ◄──►  etcd（集群状态存储）        │
-        │   kube-scheduler          kube-controller-manager │
-        └───────────────────────────┬───────────────────────┘
-                                    │ （都是通过 apiserver 通信）
-        ┌───────────────────────────┴───────────────────────┐
-   ┌────┴──────────────────┐                    ┌────────────┴──────────┐
-   │     Worker Node 1     │      ...           │     Worker Node N     │
-   │  kubelet / kube-proxy │                    │  kubelet / kube-proxy │
-   │  容器运行时(Containerd)│                    │  容器运行时(Containerd)│
-   │    Pod   Pod   Pod     │                    │    Pod   Pod   Pod    │
-   └───────────────────────┘                    └───────────────────────┘
+```mermaid
+graph TB
+    subgraph master["控制平面 (Master)"]
+        apiserver["kube-apiserver"]
+        etcd["etcd（集群状态存储）"]
+        scheduler["kube-scheduler"]
+        cm["kube-controller-manager"]
+        apiserver <-->|读写| etcd
+        scheduler --> apiserver
+        cm --> apiserver
+    end
+    subgraph worker1["Worker Node 1"]
+        kubelet1["kubelet / kube-proxy"]
+        runtime1["容器运行时（Containerd）"]
+        pods1["Pod　Pod　Pod"]
+    end
+    subgraph workern["Worker Node N"]
+        kubeletn["kubelet / kube-proxy"]
+        runtimen["容器运行时（Containerd）"]
+        podsn["Pod　Pod　Pod"]
+    end
+    apiserver <-->|所有组件都通过 apiserver 通信| kubelet1
+    apiserver <-->|所有组件都通过 apiserver 通信| kubeletn
 ```
 
 #### 控制平面组件（大脑）
@@ -151,20 +161,19 @@ Pod IP 会变，客户端不能直连 Pod。**Service 提供一个固定的访�
 **两类 Service 流量路径**（关键：内部访问和对外暴露路径不同）：
 
 **① ClusterIP 类型（默认，集群内访问）** -- 最常用，不经过 nodePort：
-```
-集群内 Pod 访问 ClusterIP:port
-        │
-        ▼ kube-proxy 转发规则（负载均衡）
-   PodIP:targetPort
+```mermaid
+graph LR
+    pod["集群内 Pod"] -->|"访问 ClusterIP:port"| proxy["kube-proxy 转发规则<br/>（负载均衡）"]
+    proxy --> podip["PodIP:targetPort"]
 ```
 就两步：访问 Service 的 ClusterIP -> kube-proxy 负载均衡落到某个 PodIP。
 
 **② NodePort / LoadBalancer 类型（对外暴露）** -- 多一个"节点入口"前置：
-```
-外部访问 NodeIP:nodePort          （或 LB 公网 IP）
-        │
-        ▼ kube-proxy 转发到 ClusterIP:port
-        ▼ 负载均衡落到 PodIP:targetPort
+```mermaid
+graph LR
+    client["外部客户端<br/>（或经 LB 公网 IP）"] -->|"访问 NodeIP:nodePort"| node["节点入口<br/>NodeIP:nodePort"]
+    node -->|"kube-proxy 转发"| svc["ClusterIP:port"]
+    svc -->|"负载均衡"| podip["PodIP:targetPort"]
 ```
 
 > ⚠️ 注意：`NodeIP:nodePort` 只是**对外暴露时的节点入口**，集群内部访问走的是 `ClusterIP:port`，**不经过 nodePort**。原"三段链路"把 nodePort 写成必经环节是错的。另外"负载均衡到 Pod"和"落 PodIP"其实是 kube-proxy 一次转发的两面，不是独立两步。
@@ -319,17 +328,12 @@ Pod 由哪个 Node 来跑，是 **scheduler（调度器）** 决定的。节点�
 
 调度器选节点分两步走，两类亲和性分别作用在**不同阶段**：
 
-```
-Pod 待调度
-   │
-   ▼
-1️⃣ Filter 过滤阶段  ← 硬亲和性（required）在这里生效
-   │  遍历所有节点，标签不满足 matchExpressions 的直接淘汰
-   ▼
-2️⃣ Score 打分阶段  ← 软亲和性（preferred）在这里生效
-   │  对幸存节点按 weight 加分（1-100），总分越高越优先
-   ▼
-选出得分最高的节点 → 由 kubelet 起容器
+```mermaid
+graph TB
+    pod["Pod 待调度"] --> filter["① Filter 过滤阶段<br/>遍历所有节点，标签不满足 matchExpressions 的直接淘汰<br/>← 硬亲和性（required）在这里生效"]
+    filter --> score["② Score 打分阶段<br/>对幸存节点按 weight 加分（1-100），总分越高越优先<br/>← 软亲和性（preferred）在这里生效"]
+    score --> selected["选出得分最高的节点"]
+    selected --> kubelet["由 kubelet 起容器"]
 ```
 
 - **硬亲和性 → Filter 阶段**：是"过滤条件"，不满足的节点根本不进打分池。
@@ -421,16 +425,12 @@ resources:
 
 #### 两个阶段各管一头
 
-```
-Pod 提交
-  │
-  ▼  调度阶段 ── requests 生效
-  │   scheduler 看"节点上所有 Pod 的 requests 之和"是否 ≤ 节点可分配容量
-  │   不够 -> 换节点 / Pending；够 -> 选这个节点
-  ▼  运行阶段 ── limits 生效
-      kubelet 给容器配 Cgroups 限制
-      CPU 超 -> 限流 throttle（卡顿但不杀）
-      内存超 -> OOM Kill（直接杀进程，容器重启）
+```mermaid
+graph TB
+    submit["Pod 提交"] --> schedule["调度阶段——requests 生效<br/>scheduler 看「节点上所有 Pod 的 requests 之和」是否 ≤ 节点可分配容量<br/>不够 → 换节点 / Pending；够 → 选这个节点"]
+    schedule --> run["运行阶段——limits 生效<br/>kubelet 给容器配 Cgroups 限制"]
+    run --> cpu["CPU 超 → 限流 throttle<br/>（卡顿但不杀）"]
+    run --> mem["内存超 → OOM Kill<br/>（直接杀进程，容器重启）"]
 ```
 
 > **关键**：requests 只是给调度器看的数字，不真正限制；limits 才是 Cgroups 写下去的硬限制。

@@ -150,18 +150,28 @@ sequenceDiagram
 
 ### 2.3 架构：Host / Client / Server
 
-```
-┌──────────────────────────────┐
-│  Host（宿主应用，如 Claude Code）│
-│   ┌─────────┐  ┌─────────┐   │
-│   │ Client1 │  │ Client2 │   │   <-- 每个 Server 对应一个 Client
-│   └────┬────┘  └────┬────┘   │
-└────────┼─────────────┼──────┘
-         │ 协议        │ 协议
-   ┌─────▼─────┐ ┌─────▼─────┐
-   │ MCP Server│ │ MCP Server│   <-- 各自暴露能力
-   │(文件系统) │ │(数据库)   │
-   └───────────┘ └───────────┘
+```mermaid
+graph TB
+    subgraph host["Host（宿主应用，如 Claude Code）"]
+        direction LR
+        subgraph clients["Clients"]
+            direction TB
+            C1[Client1]
+            C2[Client2]
+        end
+        Note_clients["每个 Server 对应一个 Client"]
+    end
+
+    subgraph servers["MCP Servers"]
+        direction LR
+        S1[MCP Server<br/>文件系统]
+        S2[MCP Server<br/>数据库]
+    end
+
+    Note_servers["各自暴露能力"]
+
+    C1 -->|协议| S1
+    C2 -->|协议| S2
 ```
 
 - **Host（宿主）**：运行 Agent 的应用（Claude Desktop、Claude Code、Cursor、IDE 插件）。管理 Client、安全、用户授权。
@@ -271,16 +281,29 @@ sequenceDiagram
 
 ### 5.3 协议三角（这是面试的金句图）
 
-```
-        工具/数据源
-            ▲
-            │ MCP（Agent<->工具）
-            │
-   Agent ◄───┴──► Agent          ◄── A2A / ACP（Agent<->Agent）
-            │
-            │ AG-UI（Agent<->前端UI）
-            ▼
-          用户/前端
+```mermaid
+graph TD
+    subgraph triangle_top["工具/数据源"]
+        direction TB
+        T[工具/数据源]
+    end
+
+    subgraph triangle_middle["Agent 间"]
+        direction LR
+        A1[Agent]
+        A2[Agent]
+    end
+
+    subgraph triangle_bottom["用户/前端"]
+        direction TB
+        U[用户/前端]
+    end
+
+    A1 -->|MCP<br/>Agent<->工具| T
+    A2 -->|MCP<br/>Agent<->工具| T
+    A1 <-->|A2A / ACP<br/>Agent<->Agent| A2
+    A1 -->|AG-UI<br/>Agent<->前端UI| U
+    A2 -->|AG-UI<br/>Agent<->前端UI| U
 ```
 
 | 协议 | 通信两端 | 解决 |

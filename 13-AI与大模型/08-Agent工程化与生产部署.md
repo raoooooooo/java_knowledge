@@ -195,24 +195,46 @@
 
 ## 九、生产部署架构参考
 
-```
-[用户/前端]
-    │ (AG-UI（Agent-User Interaction Protocol）事件流)
-    ▼
-[Agent 网关] -- 鉴权/限流/审计/多模型适配
-    │
-    ▼
-[Agent 运行时 / Harness] -- 状态管理/会话持久化/断点恢复
-    │
-    ├──> [模型路由层] --> 各模型厂商 / 私有模型
-    ├──> [MCP 工具/外部服务]  (MCP)
-    ├──> [RAG / 向量库]      (检索)
-    ├──> [长期记忆库]
-    ├──> [内容审核/安全中间件]
-    ▼
-[可观测] Trace/日志/指标 (LangSmith/Langfuse)
-[注册中心] Agent 注册/发现/版本/灰度
-[评测平台] 离线集 + LLM-as-Judge
+```mermaid
+graph TB
+    subgraph client_layer["用户/前端"]
+        Client[用户/前端]
+    end
+
+    subgraph gateway_layer["Agent 网关"]
+        Gateway[Agent 网关<br/>鉴权/限流/审计/多模型适配]
+    end
+
+    subgraph runtime_layer["Agent 运行时 / Harness"]
+        Harness[Agent 运行时 / Harness<br/>状态管理/会话持久化/断点恢复]
+    end
+
+    subgraph dependency_layer["依赖服务"]
+        direction LR
+        ModelRoute[模型路由层<br/>各模型厂商 / 私有模型]
+        MCPTool[MCP 工具/外部服务<br/>MCP]
+        RAG[RAG / 向量库<br/>检索]
+        LongTermMem[长期记忆库]
+        Security[内容审核/安全中间件]
+    end
+
+    subgraph platform_layer["支撑平台"]
+        direction LR
+        Observability[可观测<br/>Trace/日志/指标<br/>LangSmith/Langfuse]
+        Registry[注册中心<br/>Agent 注册/发现/版本/灰度]
+        Eval[评测平台<br/>离线集 + LLM-as-Judge]
+    end
+
+    Client -->|AG-UI 事件流| Gateway
+    Gateway --> Harness
+    Harness --> ModelRoute
+    Harness --> MCPTool
+    Harness --> RAG
+    Harness --> LongTermMem
+    Harness --> Security
+    Harness --> Observability
+    Harness --> Registry
+    Harness --> Eval
 ```
 
 要点：

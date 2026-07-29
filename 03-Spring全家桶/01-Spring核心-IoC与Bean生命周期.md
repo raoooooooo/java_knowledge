@@ -277,8 +277,9 @@ graph TD
 
 #### 3. 三个初始化方法的执行顺序 ⭐⭐
 
-```
-@PostConstruct  →  InitializingBean.afterPropertiesSet()  →  init-method
+```mermaid
+graph LR
+    PC["@PostConstruct"] --> APS["InitializingBean.afterPropertiesSet()"] --> IM["init-method"]
 ```
 
 > ⚠️ **铁律纠错**：网上有说法称 `@PostConstruct` 和 `afterPropertiesSet` 顺序不确定——**错误**。`@PostConstruct` 由 `CommonAnnotationBeanPostProcessor.postProcessBeforeInitialization()` 处理，发生在 `afterPropertiesSet` **之前**；两者都发生在 `postProcessAfterInitialization`（AOP 代理生成）**之前**。这意味着 **@PostConstruct 内 `this` 是原始对象，不是代理对象**，`this` 调用走不到代理逻辑。

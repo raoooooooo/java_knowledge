@@ -36,9 +36,9 @@ SpringCloud 的版本号经历过一次重大变化，**面试常考，资料常
 
 按字母顺序依次命名，称为 **Release Train（发布列车）**：
 
-```
-Angel → Brixton → Camden → Dalston → Edgware → Finchley
-      → Greenwich → Hoxton
+```mermaid
+graph LR
+    A["Angel"] --> B["Brixton"] --> C["Camden"] --> D["Dalston"] --> E["Edgware"] --> F["Finchley"] --> G["Greenwich"] --> H["Hoxton"]
 ```
 
 每个字母对应一个伦敦地铁站名，按字母序往后推。如 `Finchley` 对应 SpringBoot 2.0.x，`Hoxton` 对应 SpringBoot 2.2.x/2.3.x。

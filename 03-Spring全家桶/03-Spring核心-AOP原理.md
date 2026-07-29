@@ -298,22 +298,26 @@ public class LogAspect {
 
 **Spring Framework 5.2.7 之前**（对应 Spring Boot 2.3.2 之前的版本）：
 
-```
-正常情况：
-  @Around-前 -> @Before -> 业务方法 -> @After -> @AfterReturning -> @Around-后
-
-异常情况：
-  @Around-前 -> @Before -> 业务抛异常 -> @After -> @AfterThrowing -> @Around-后(抛异常)
+```mermaid
+graph LR
+    subgraph OLD_N["正常情况"]
+        ON1["@Around-前"] --> ON2["@Before"] --> ON3["业务方法"] --> ON4["@After"] --> ON5["@AfterReturning"] --> ON6["@Around-后"]
+    end
+    subgraph OLD_E["异常情况"]
+        OE1["@Around-前"] --> OE2["@Before"] --> OE3["业务抛异常"] --> OE4["@After"] --> OE5["@AfterThrowing"] --> OE6["@Around-后(抛异常)"]
+    end
 ```
 
 **Spring Framework 5.2.7 之后**（调整 @After 位置，与 AspectJ 语义对齐）：
 
-```
-正常情况：
-  @Around-前 -> @Before -> 业务方法 -> @AfterReturning -> @After -> @Around-后
-
-异常情况：
-  @Around-前 -> @Before -> 业务抛异常 -> @AfterThrowing -> @After -> @Around-后(抛异常)
+```mermaid
+graph LR
+    subgraph NEW_N["正常情况"]
+        NN1["@Around-前"] --> NN2["@Before"] --> NN3["业务方法"] --> NN4["@AfterReturning"] --> NN5["@After"] --> NN6["@Around-后"]
+    end
+    subgraph NEW_E["异常情况"]
+        NE1["@Around-前"] --> NE2["@Before"] --> NE3["业务抛异常"] --> NE4["@AfterThrowing"] --> NE5["@After"] --> NE6["@Around-后(抛异常)"]
+    end
 ```
 
 ⚠️ **版本差异说明（务必记准方向）**：Spring 5.2.7 把 `@After`（finally 语义）从「业务方法后第一时间执行」调整到「`@AfterReturning`/`@AfterThrowing` 之后执行」，目的是与 AspectJ 语义对齐。判断依据：Java 的 `try-catch-finally` 中 `finally` 是最后执行的；`@After` 既是 finally 语义，就应在 `@AfterReturning`/`@AfterThrowing` **之后**执行。Spring 5.2.7 release notes 原文："the @AfterReturning advice will be invoked before @After advice"。**对应 Spring Boot 版本：Spring Boot 2.3.2.RELEASE 起使用新顺序**。
@@ -487,12 +491,20 @@ OrderService proxy = (OrderService) enhancer.create();
 
 这是 Spring AOP 的「大脑」，类继承关系：
 
-```
-AnnotationAwareAspectJAutoProxyCreator        ◀── 解析 @Aspect/@Pointcut/@Before 注解
-        extends AspectJAwareAdvisorAutoProxyCreator
-        extends AbstractAdvisorAutoProxyCreator  ◀── 用 Advisor 中的 Pointcut 匹配 Bean
-        extends AbstractAutoProxyCreator          ◀── 真正生成代理的核心
-        implements SmartInstantiationAwareBeanPostProcessor, BeanFactoryAware
+```mermaid
+graph BT
+    AAC["AnnotationAwareAspectJAutoProxyCreator<br/>◀ 解析 @Aspect/@Pointcut/@Before 注解"]
+    AJC["AspectJAwareAdvisorAutoProxyCreator"]
+    ADC["AbstractAdvisorAutoProxyCreator<br/>◀ 用 Advisor 中的 Pointcut 匹配 Bean"]
+    APC["AbstractAutoProxyCreator<br/>◀ 真正生成代理的核心"]
+    SI["SmartInstantiationAwareBeanPostProcessor"]
+    BFA["BeanFactoryAware"]
+
+    AAC -->|extends| AJC
+    AJC -->|extends| ADC
+    ADC -->|extends| APC
+    APC -.->|implements| SI
+    APC -.->|implements| BFA
 ```
 
 **关键点**：`AbstractAutoProxyCreator` 实现了 `BeanPostProcessor`，所以它能在 Bean 生命周期的关键节点介入。

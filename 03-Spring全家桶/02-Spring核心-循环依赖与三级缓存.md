@@ -204,10 +204,9 @@ Spring AOP 的设计原则是：**代理对象延迟到 `postProcessAfterInitial
 
 回顾 Bean 创建三阶段：
 
-```
-1. 实例化（createBeanInstance）：调用构造器 new 出裸对象
-2. 属性填充（populateBean）：处理 @Autowired/@Resource
-3. 初始化（initializeBean）：调用 BeanPostProcessor 前后置、init-method
+```mermaid
+graph LR
+    S1["1. 实例化（createBeanInstance）<br/>调用构造器 new 出裸对象"] --> S2["2. 属性填充（populateBean）<br/>处理 @Autowired/@Resource"] --> S3["3. 初始化（initializeBean）<br/>调用 BeanPostProcessor 前后置、init-method"]
 ```
 
 三级缓存解决循环依赖的前提是：**在「实例化」之后、能拿到裸对象，才能把 ObjectFactory 放入三级缓存**。

@@ -35,45 +35,45 @@ Can-Retransform-Classes: true
 
 #### 2.1 整体启动流程
 
-```
-java -javaagent:skywalking-agent.jar -jar app.jar
-
-1. JVM 加载 Agent
-2. 调用 SkyWalkingAgent.premain(agentArgs, instrumentation)
-3. Agent 初始化
-4. 注册 ClassFileTransformer
-5. 加载业务类时自动增强
-6. 业务方法被拦截，生成 Span 数据
+```mermaid
+graph TB
+    start["java -javaagent:skywalking-agent.jar -jar app.jar"] --> s1["1. JVM 加载 Agent"]
+    s1 --> s2["2. 调用 SkyWalkingAgent.premain(agentArgs, instrumentation)"]
+    s2 --> s3["3. Agent 初始化"]
+    s3 --> s4["4. 注册 ClassFileTransformer"]
+    s4 --> s5["5. 加载业务类时自动增强"]
+    s5 --> s6["6. 业务方法被拦截，生成 Span 数据"]
 ```
 
 #### 2.2 详细启动流程（源码分析）
 
-```
-SkyWalkingAgent.premain()
-  │
-  ├── 1. 初始化配置（SnifferConfigInitializer）
-  │     ├── 读取 agent.config 配置文件
-  │     ├── 读取系统属性（-DSW_AGENT_NAME 等）
-  │     └── 合并配置（系统属性优先级 > 配置文件）
-  │
-  ├── 2. 加载插件（PluginFinder）
-  │     ├── 扫描 skywalking-agent.jar 中的插件
-  │     ├── 解析每个插件的 skywalking-plugin.def 文件
-  │     └── 构建 PluginFinder（插件查找器）
-  │
-  ├── 3. 初始化核心组件
-  │     ├── ServiceManager：管理 Agent 内部服务（GRPCChannelManager 等）
-  │     ├── ContextManager：Trace 上下文管理器
-  │     └── TracingContext：当前线程的 Trace 上下文
-  │
-  ├── 4. 使用 ByteBuddy 创建 AgentBuilder
-  │     └── new AgentBuilder.Default()
-  │           .type(pluginFinder.buildMatch())   // 匹配需要增强的类
-  │           .transform(new Transformer())       // 转换匹配到的类
-  │           .with(new Listener())               // 监听转换结果
-  │           .installOn(instrumentation)         // 安装到 JVM
-  │
-  └── 5. 启动完成，Agent 开始在后台监听类加载
+```mermaid
+graph TD
+    premain["SkyWalkingAgent.premain()"]
+
+    premain --> step1["1. 初始化配置（SnifferConfigInitializer）"]
+    step1 --> s11["读取 agent.config 配置文件"]
+    step1 --> s12["读取系统属性（-DSW_AGENT_NAME 等）"]
+    step1 --> s13["合并配置（系统属性优先级 > 配置文件）"]
+
+    premain --> step2["2. 加载插件（PluginFinder）"]
+    step2 --> s21["扫描 skywalking-agent.jar 中的插件"]
+    step2 --> s22["解析每个插件的 skywalking-plugin.def 文件"]
+    step2 --> s23["构建 PluginFinder（插件查找器）"]
+
+    premain --> step3["3. 初始化核心组件"]
+    step3 --> s31["ServiceManager：管理 Agent 内部服务（GRPCChannelManager 等）"]
+    step3 --> s32["ContextManager：Trace 上下文管理器"]
+    step3 --> s33["TracingContext：当前线程的 Trace 上下文"]
+
+    premain --> step4["4. 使用 ByteBuddy 创建 AgentBuilder"]
+    step4 --> s41["new AgentBuilder.Default()"]
+    s41 --> s42[".type(pluginFinder.buildMatch())<br/>匹配需要增强的类"]
+    s42 --> s43[".transform(new Transformer())<br/>转换匹配到的类"]
+    s43 --> s44[".with(new Listener())<br/>监听转换结果"]
+    s44 --> s45[".installOn(instrumentation)<br/>安装到 JVM"]
+
+    premain --> step5["5. 启动完成，Agent 开始在后台监听类加载"]
 ```
 
 ### 3. 类加载隔离
@@ -84,20 +84,24 @@ SkyWalkingAgent.premain()
 
 **场景 1：依赖版本冲突（最常见）**
 
-```
-业务应用的 classpath：
-  ├── gRPC 1.30（业务 2019 年上线，一直没升级）
-  ├── Netty 4.1.42
-  └── Protobuf 3.5
+```mermaid
+graph TB
+    subgraph biz_cp["业务应用的 classpath"]
+        b1["gRPC 1.30（业务 2019 年上线，一直没升级）"]
+        b2["Netty 4.1.42"]
+        b3["Protobuf 3.5"]
+    end
 
-SkyWalking Agent 的 classpath：
-  ├── gRPC 1.50（Agent 2023 年版本，需要新特性）
-  ├── Netty 4.1.90
-  └── Protobuf 3.21
+    subgraph agent_cp["SkyWalking Agent 的 classpath"]
+        a1["gRPC 1.50（Agent 2023 年版本，需要新特性）"]
+        a2["Netty 4.1.90"]
+        a3["Protobuf 3.21"]
+    end
 
-如果不隔离：
-  JVM 先加载到业务的 gRPC 1.30 → Agent 调用 gRPC 1.50 新增的方法
-  → NoSuchMethodError → 业务应用启动失败！
+    fail["如果不隔离：<br/>JVM 先加载到业务的 gRPC 1.30 → Agent 调用 gRPC 1.50 新增的方法<br/>→ NoSuchMethodError → 业务应用启动失败！"]
+
+    biz_cp --> fail
+    agent_cp --> fail
 ```
 
 **场景 2：类重复加载问题**
@@ -133,24 +137,24 @@ Agent 的日志打到业务的日志文件里，或者反过来
 
 #### 3.2 AgentClassLoader 设计
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   JVM 类加载器层次                       │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  Bootstrap ClassLoader（加载 rt.jar，JDK 核心类）        │
-│        │                                               │
-│        ├── ExtClassLoader（JDK 8）/ PlatformClassLoader │
-│        │                                               │
-│        └── AppClassLoader（加载业务应用的类）             │
-│              │                                         │
-│              └── AgentClassLoader（加载 Agent 的类）      │
-│                    ├── gRPC 1.50（Agent 自己的版本）     │
-│                    ├── ByteBuddy（Agent 自己的版本）      │
-│                    ├── Protobuf 3.x（Agent 自己的版本）   │
-│                    └── 所有插件类（PluginClassLoader）     │
-│                                                        │
-└────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    bootstrap["Bootstrap ClassLoader<br/>（加载 rt.jar，JDK 核心类）"]
+    ext["ExtClassLoader（JDK 8）/ PlatformClassLoader"]
+    app["AppClassLoader（加载业务应用的类）"]
+    agent_cl["AgentClassLoader（加载 Agent 的类）"]
+    grpc["gRPC 1.50（Agent 自己的版本）"]
+    bytebuddy["ByteBuddy（Agent 自己的版本）"]
+    protobuf["Protobuf 3.x（Agent 自己的版本）"]
+    plugin_cl["所有插件类（PluginClassLoader）"]
+
+    bootstrap --> ext
+    bootstrap --> app
+    app --> agent_cl
+    agent_cl --> grpc
+    agent_cl --> bytebuddy
+    agent_cl --> protobuf
+    agent_cl --> plugin_cl
 ```
 
 **关键设计**：
@@ -273,12 +277,14 @@ Tomcat WebAppClassLoader 故意打破双亲委派：
 
 **SkyWalking 打破双亲委派的方式：AgentClassLoader 采用 child-first（子优先）策略**
 
-```
-标准双亲委派（AppClassLoader 等默认加载器）：
-  收到加载请求 -> 先问父加载器 -> 父加载不了 -> 自己才加载
-
-SkyWalking 的 AgentClassLoader（child-first 子优先，打破双亲委派！）：
-  收到加载请求 -> 先自己加载（找自己的 jar） -> 自己加载不了 -> 才问父加载器
+```mermaid
+graph LR
+    subgraph standard["标准双亲委派（AppClassLoader 等默认加载器）"]
+        a1["收到加载请求"] --> a2["先问父加载器"] --> a3["父加载不了"] --> a4["自己才加载"]
+    end
+    subgraph child_first["SkyWalking 的 AgentClassLoader（child-first 子优先，打破双亲委派！）"]
+        b1["收到加载请求"] --> b2["先自己加载（找自己的 jar）"] --> b3["自己加载不了"] --> b4["才问父加载器"]
+    end
 ```
 
 **为什么要这样打破？为了 Agent 和业务的依赖隔离：**
@@ -300,18 +306,19 @@ SkyWalking Agent 用了 gRPC 1.50
 
 **核心诉求：增强"框架入口点"，只在极少数场景增强 JDK 核心类。**
 
-```
-SkyWalking 的增强策略：
-  ├── 绝大多数插件：增强 @RestController / @Service（业务层入口）
-  ├── 绝大多数插件：增强 Dubbo Provider / Consumer（RPC 入口）
-  ├── 绝大多数插件：增强 JDBC Driver / Redis Client（中间件入口）
-  └── 极少数 Bootstrap 插件：增强 JDK 核心类（如 java.net.HttpURLConnection）
+```mermaid
+graph TD
+    strategy["SkyWalking 的增强策略"]
+    strategy --> p1["绝大多数插件：增强 @RestController / @Service（业务层入口）"]
+    strategy --> p2["绝大多数插件：增强 Dubbo Provider / Consumer（RPC 入口）"]
+    strategy --> p3["绝大多数插件：增强 JDBC Driver / Redis Client（中间件入口）"]
+    strategy --> p4["极少数 Bootstrap 插件：增强 JDK 核心类（如 java.net.HttpURLConnection）"]
 
-  这些入口类的共同点：
-    → 都由 AppClassLoader 或 WebAppClassLoader 加载
-    → AgentClassLoader 是 AppClassLoader 的子加载器
-    → 遵循双亲委派，子加载器能看到父加载器的类
-    → 完全不需要 Bootstrap 注入！
+    common["这些入口类的共同点：<br/>都由 AppClassLoader 或 WebAppClassLoader 加载<br/>AgentClassLoader 是 AppClassLoader 的子加载器<br/>遵循双亲委派，子加载器能看到父加载器的类<br/>完全不需要 Bootstrap 注入！"]
+
+    p1 --> common
+    p2 --> common
+    p3 --> common
 ```
 
 结果：**SkyWalking 的插件数量比 Pinpoint 少，但稳定性更好**——Pinpoint 追求"全链路无死角"，SkyWalking 追求"覆盖 99% 场景，牺牲 1% 换稳定性"。
@@ -444,23 +451,17 @@ OTel也shade了Guava 31.1（在AgentClassLoader里）
 
 ##### ⑤ 面试延伸：三种方案的选型决策树
 
-```
-你要做一个APM探针，怎么选隔离方案？
-
-第一步：你需要增强JDK核心类吗？
-  ├─ 需要 → 选Pinpoint的方案（Bootstrap注入 + 打破双亲委派）
-  │
-  └─ 不需要 → 进入第二步
-       │
-       ├── 第二步：你的目标用户是什么？
-       │    ├─ 标准化、生态优先 → 选OTel的方案（影子类，兼容性最好）
-       │    │
-       │    └─ 性能敏感、追求极致稳定 → 选SkyWalking的方案（自定义ClassLoader）
-       │
-       └── 第三步：你愿意为兼容性付出多少性能代价？
-            ├─ 零容忍 → 自定义ClassLoader
-            ├─ 可以接受几毫秒启动开销 → 影子类
-            └─ 可以接受更高开销换取最强适配 → Bootstrap注入
+```mermaid
+graph TD
+    q1{"第一步：你需要增强 JDK 核心类吗？"}
+    q1 -- "需要" --> pinpoint["选 Pinpoint 的方案<br/>（Bootstrap 注入 + 打破双亲委派）"]
+    q1 -- "不需要" --> q2{"第二步：你的目标用户是什么？"}
+    q2 -- "标准化、生态优先" --> otel["选 OTel 的方案<br/>（影子类，兼容性最好）"]
+    q2 -- "性能敏感、追求极致稳定" --> sw["选 SkyWalking 的方案<br/>（自定义 ClassLoader）"]
+    q2 --> q3{"第三步：你愿意为兼容性付出多少性能代价？"}
+    q3 -- "零容忍" --> cl["自定义 ClassLoader"]
+    q3 -- "可以接受几毫秒启动开销" --> shade["影子类"]
+    q3 -- "可以接受更高开销换取最强适配" --> boot["Bootstrap 注入"]
 ```
 
 #### 3.7 灵魂拷问：方向搞反了！到底是谁看不到谁？ ⭐⭐⭐⭐⭐
@@ -480,21 +481,13 @@ OTel也shade了Guava 31.1（在AgentClassLoader里）
 
 **这才是真正的问题！方向完全反了！**
 
-```
-                    ┌─────────────────────────────────────────┐
-                    │  Bootstrap ClassLoader                  │
-                    │  java.net.Socket、java.lang.String      │
-                    └────────────────────┬────────────────────┘
-                                         │
-                    ┌────────────────────▼────────────────────┐
-                    │  Application ClassLoader                │
-                    │  UserService、OrderService              │
-                    └────────────────────┬────────────────────┘
-                                         │
-                    ┌────────────────────▼────────────────────┐
-                    │  AgentClassLoader                       │
-                    │  TraceInterceptor、Span、Segment        │
-                    └─────────────────────────────────────────┘
+```mermaid
+graph TD
+    bootstrap["Bootstrap ClassLoader<br/>java.net.Socket、java.lang.String"]
+    app_cl["Application ClassLoader<br/>UserService、OrderService"]
+    agent_cl["AgentClassLoader<br/>TraceInterceptor、Span、Segment"]
+
+    bootstrap --> app_cl --> agent_cl
 ```
 
 **✅ 能看到：子 → 父（下 → 上）**
@@ -511,29 +504,15 @@ OTel也shade了Guava 31.1（在AgentClassLoader里）
 
 让我们一步步拆解增强过程中到底发生了什么：
 
-```
-第1步：Agent 启动，ByteBuddy 准备增强 Socket
-  ↓
-第2步：ByteBuddy 读取 java.net.Socket 的字节码（由 Bootstrap 加载）
-  ↓
-第3步：ByteBuddy 在 Socket 的 connect() 方法里插入拦截代码
-  ↓
-  插入的代码大致是：
-  public void connect(SocketAddress addr) {
-      TraceInterceptor.intercept(this);  // ← 这里要调用 Agent 的拦截器！
-      // 原来的 connect 逻辑
-  }
-  ↓
-第4步：问题来了！
-  Socket 这个类是由 Bootstrap ClassLoader 定义的
-  当 JVM 执行 connect() 方法时，遇到 TraceInterceptor 这个类
-  JVM 会问："谁加载了 Socket？让 Socket 的类加载器去加载 TraceInterceptor！"
-  ↓
-  Socket 的类加载器是 Bootstrap
-  Bootstrap 去它的搜索路径里找 TraceInterceptor
-  找不到！！！
-  ↓
-第5步：结果：ClassNotFoundException！增强失败！
+```mermaid
+graph TB
+    s1["第1步：Agent 启动，ByteBuddy 准备增强 Socket"]
+    s2["第2步：ByteBuddy 读取 java.net.Socket 的字节码（由 Bootstrap 加载）"]
+    s3["第3步：ByteBuddy 在 Socket 的 connect() 方法里插入拦截代码：<br/>public void connect(SocketAddress addr) {<br/>&nbsp;&nbsp;TraceInterceptor.intercept(this);&nbsp;&nbsp;// ← 这里要调用 Agent 的拦截器！<br/>&nbsp;&nbsp;// 原来的 connect 逻辑<br/>}"]
+    s4["第4步：问题来了！<br/>Socket 这个类是由 Bootstrap ClassLoader 定义的<br/>JVM 执行 connect() 方法时，遇到 TraceInterceptor 这个类<br/>JVM 会问：谁加载了 Socket？让 Socket 的类加载器去加载 TraceInterceptor！<br/>Socket 的类加载器是 Bootstrap<br/>Bootstrap 去它的搜索路径里找 TraceInterceptor → 找不到！！！"]
+    s5["第5步：结果：ClassNotFoundException！增强失败！"]
+
+    s1 --> s2 --> s3 --> s4 --> s5
 ```
 
 **这就是问题的本质：不是 Agent 看不到 JDK 的类，而是 JDK 的类看不到 Agent 的类！**
@@ -683,22 +662,18 @@ UserController 当然能看到同一个类加载器里的拦截器了！
 
 ##### 终极总结：为什么APM必须搞这么复杂？
 
-```
-1. APM的目标：无侵入监控业务对各种库的调用
-       ↓
-2. 无侵入 = 不能让业务改代码，只能在库的内部插入监控代码
-       ↓
-3. 在库内部插入代码 = 增强库的类（比如 Socket）
-       ↓
-4. 增强后的Socket要回调Agent的拦截器
-       ↓
-5. Socket由Bootstrap加载，拦截器由AgentClassLoader加载
-       ↓
-6. Bootstrap（父）看不到AgentClassLoader（子）的拦截器
-       ↓
-7. 必须把拦截器注入到Bootstrap，让Socket能找到它
-       ↓
-这就是为什么Pinpoint必须打破双亲委派、必须注入Bootstrap的根本原因！
+```mermaid
+graph TB
+    c1["1. APM 的目标：无侵入监控业务对各种库的调用"]
+    c2["2. 无侵入 = 不能让业务改代码，只能在库的内部插入监控代码"]
+    c3["3. 在库内部插入代码 = 增强库的类（比如 Socket）"]
+    c4["4. 增强后的 Socket 要回调 Agent 的拦截器"]
+    c5["5. Socket 由 Bootstrap 加载，拦截器由 AgentClassLoader 加载"]
+    c6["6. Bootstrap（父）看不到 AgentClassLoader（子）的拦截器"]
+    c7["7. 必须把拦截器注入到 Bootstrap，让 Socket 能找到它"]
+    c8["这就是为什么 Pinpoint 必须打破双亲委派、必须注入 Bootstrap 的根本原因！"]
+
+    c1 --> c2 --> c3 --> c4 --> c5 --> c6 --> c7 --> c8
 ```
 
 > **🔥 终极面试必杀句：** APM要监控的不是"Agent怎么用Socket"，而是"业务怎么用Socket"。前者是Agent主动调用（子调父，可以），后者是Socket被动通知Agent（父调子，不行）。无侵入监控的要求，注定了APM必须走"增强Socket让它回调拦截器"这条路，也就注定了必须解决"父看不到子"的可见性问题--这就是Pinpoint注入Bootstrap、SkyWalking用ByteBuddy把拦截器注入到目标类加载器的根本原因。
@@ -739,20 +714,21 @@ UserController 当然能看到同一个类加载器里的拦截器了！
 
 #### 4.2 增强流程
 
-```
-1. 类加载时 JVM 触发 ClassFileTransformer
-      │
-2. AgentBuilder 根据匹配规则，判断是否需要增强该类
-      │
-3. 如果匹配：
-   ├── 创建 DynamicType.Builder
-   ├── 根据插件定义，选择拦截点
-   ├── 使用 ByteBuddy 生成增强后的字节码
-   └── 返回新的字节码给 JVM
-      │
-4. JVM 使用增强后的字节码定义类
-      │
-5. 当业务方法被调用时，拦截器自动生效
+```mermaid
+graph TB
+    s1["1. 类加载时 JVM 触发 ClassFileTransformer"]
+    s2["2. AgentBuilder 根据匹配规则，判断是否需要增强该类"]
+    s3{"3. 如果匹配"}
+    s31["创建 DynamicType.Builder"]
+    s32["根据插件定义，选择拦截点"]
+    s33["使用 ByteBuddy 生成增强后的字节码"]
+    s34["返回新的字节码给 JVM"]
+    s4["4. JVM 使用增强后的字节码定义类"]
+    s5["5. 当业务方法被调用时，拦截器自动生效"]
+
+    s1 --> s2 --> s3
+    s3 --> s31 --> s32 --> s33 --> s34
+    s34 --> s4 --> s5
 ```
 
 #### 4.3 增强示例
@@ -930,40 +906,28 @@ public class SpringMVCInterceptor implements InstanceMethodsAroundInterceptor {
 
 #### 6.1 核心类图
 
-```
-ContextManager（线程安全、入口类）
-  │
-  ├── createEntrySpan()    → 创建 Entry Span（接收请求）
-  ├── createExitSpan()     → 创建 Exit Span（发起调用）
-  ├── createLocalSpan()    → 创建 Local Span（内部操作）
-  ├── activeSpan()         → 获取当前活跃 Span
-  ├── stopSpan()           → 停止当前 Span
-  ├── capture()            → 捕获 ContextSnapshot（跨线程）
-  ├── continued()          → 恢复 ContextSnapshot（跨线程）
-  └── getGlobalTraceId()   → 获取全局 TraceId
+```mermaid
+graph TD
+    cm["ContextManager（线程安全、入口类）"]
+    cm --> m1["createEntrySpan() → 创建 Entry Span（接收请求）"]
+    cm --> m2["createExitSpan() → 创建 Exit Span（发起调用）"]
+    cm --> m3["createLocalSpan() → 创建 Local Span（内部操作）"]
+    cm --> m4["activeSpan() → 获取当前活跃 Span"]
+    cm --> m5["stopSpan() → 停止当前 Span"]
+    cm --> m6["capture() → 捕获 ContextSnapshot（跨线程）"]
+    cm --> m7["continued() → 恢复 ContextSnapshot（跨线程）"]
+    cm --> m8["getGlobalTraceId() → 获取全局 TraceId"]
 ```
 
 #### 6.2 TracingContext 状态机
 
-```
-          ┌──────────────────────────────────────┐
-          │          TracingContext 状态机         │
-          └──────────────────────────────────────┘
-
-  [初始化] ──→ createEntrySpan() ──→ [活跃]
-    │                                    │
-    │                              createExitSpan()
-    │                              createLocalSpan()
-    │                                    │
-    │                              stopSpan()
-    │                                    │
-    │                                    ▼
-    │                              [活跃] (Span 栈非空)
-    │                                    │
-    │                              stopSpan() ← 最后一个 Span
-    │                                    │
-    │                                    ▼
-    └──────────────────────────── [完成] → 上报 Segment
+```mermaid
+stateDiagram-v2
+    [*] --> 活跃: createEntrySpan()
+    活跃 --> 活跃: createExitSpan() / createLocalSpan()
+    活跃 --> 活跃: stopSpan()<br/>（Span 栈非空）
+    活跃 --> 完成: stopSpan()<br/>（最后一个 Span）
+    完成 --> [*]: 上报 Segment
 ```
 
 **关键规则**：

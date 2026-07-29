@@ -6,33 +6,25 @@
 
 SkyWalking OAP 支持多种存储后端，通过 **ModuleProvider 机制** 实现可插拔：
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                    存储引擎架构                                    │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  OAP 存储抽象层（StorageDAO 接口）                          │   │
-│  │  ├── IMetricsDAO：指标数据 DAO                             │   │
-│  │  ├── IRecordDAO：记录数据 DAO（Trace/Segment）             │   │
-│  │  ├── ILogDAO：日志数据 DAO                                 │   │
-│  │  ├── IAlarmDAO：告警数据 DAO                               │   │
-│  │  └── ITopNDAO：TopN 数据 DAO                               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│           │                 │                │                    │
-│     ┌─────▼─────┐   ┌───────▼──────┐  ┌──────▼───────┐          │
-│     │  BanyanDB │   │Elasticsearch │  │ JDBC(H2/MySQL│          │
-│     │  (自研)    │   │  (生产推荐)   │  │  /PgSQL)     │          │
-│     └───────────┘   └──────────────┘  └──────────────┘          │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  TTL 数据清理（DataTTL）                                    │   │
-│  │  ├── recordDataTTL：记录数据保留时间（默认 3 天）            │   │
-│  │  ├── metricsDataTTL：指标数据保留时间（默认 7 天）           │   │
-│  │  └── logDataTTL：日志数据保留时间（默认 7 天）               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph dao["OAP 存储抽象层（StorageDAO 接口）"]
+        metrics_dao["IMetricsDAO：指标数据 DAO"]
+        record_dao["IRecordDAO：记录数据 DAO（Trace/Segment）"]
+        log_dao["ILogDAO：日志数据 DAO"]
+        alarm_dao["IAlarmDAO：告警数据 DAO"]
+        topn_dao["ITopNDAO：TopN 数据 DAO"]
+    end
+
+    dao --> banyandb["BanyanDB（自研）"]
+    dao --> es["Elasticsearch（生产推荐）"]
+    dao --> jdbc["JDBC（H2 / MySQL / PgSQL）"]
+
+    subgraph ttl["TTL 数据清理（DataTTL）"]
+        record_ttl["recordDataTTL：记录数据保留时间（默认 3 天）"]
+        metrics_ttl["metricsDataTTL：指标数据保留时间（默认 7 天）"]
+        log_ttl["logDataTTL：日志数据保留时间（默认 7 天）"]
+    end
 ```
 
 ### 2. H2（内存/文件数据库）
@@ -209,11 +201,12 @@ ES 基于 Lucene，一条文档落盘时不是只写一次，而是同时存成�
 
 **第二层（更隐蔽、更致命）：Lucene Segment 合并重写**
 
-```
-写入 → indexing buffer(内存)
-  → refresh(默认1s，APM调到30s) → 刷成不可变 segment
-  → segment 堆积 → 后台 merge 合并成大 segment
-  → ⚠️ 合并时读出旧 segment、再写入新 segment，旧 segment 才能删
+```mermaid
+graph LR
+    w["写入"] --> buf["indexing buffer（内存）"]
+    buf -- "refresh（默认 1s，APM 调到 30s）" --> seg["刷成不可变 segment"]
+    seg --> merge["segment 堆积 → 后台 merge 合并成大 segment"]
+    merge --> warn["⚠️ 合并时读出旧 segment、再写入新 segment，旧 segment 才能删"]
 ```
 
 一次数据在它的生命周期里可能被**重写 3~5 次**，这部分磁盘 I/O 是"白干"的——业务只写一份，磁盘实际写了好多份。
@@ -260,35 +253,30 @@ BanyanDB 是 SkyWalking 为 APM 场景**自研的时序数据库**，从 v10 开
 
 #### 5.2 核心设计
 
-```
 BanyanDB 存储引擎设计：
 
-┌──────────────────────────────────────────────────────────────┐
-│  Measure（指标数据）                                          │
-│  ├── 列式存储（Column Family）                               │
-│  ├── LSM-Tree 写入优化                                       │
-│  ├── 时间分区（Time Partition）                               │
-│  └── 预聚合（Pre-aggregation）                                │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  列式存储示例：                                        │   │
-│  │  timestamp       | 1 | 2 | 3 | 4 | 5 | ...          │   │
-│  │  service_id      | A | A | B | B | A | ...          │   │
-│  │  value           | 10| 12| 8 | 9 | 11| ...          │   │
-│  │                                                      │   │
-│  │  按列压缩：value 列 → Delta 编码 → 高压缩比            │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                              │
-│  Stream（记录数据：Trace/Log）                                │
-│  ├── 行式存储（Row Store）                                   │
-│  ├── 按 TraceId 构建索引                                     │
-│  └── 时间分区 + TTL 自动清理                                  │
-│                                                              │
-│  Property（元数据：Service/Endpoint/Instance）                │
-│  ├── 文档型存储                                              │
-│  └── 低频率更新                                              │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph measure["Measure（指标数据）"]
+        m1["列式存储（Column Family）"]
+        m2["LSM-Tree 写入优化"]
+        m3["时间分区（Time Partition）"]
+        m4["预聚合（Pre-aggregation）"]
+        subgraph col_example["列式存储示例"]
+            cols["timestamp ｜ 1, 2, 3, 4, 5, ...<br/>service_id ｜ A, A, B, B, A, ...<br/>value ｜ 10, 12, 8, 9, 11, ...<br/>按列压缩：value 列 → Delta 编码 → 高压缩比"]
+        end
+    end
+
+    subgraph stream["Stream（记录数据：Trace/Log）"]
+        s1["行式存储（Row Store）"]
+        s2["按 TraceId 构建索引"]
+        s3["时间分区 + TTL 自动清理"]
+    end
+
+    subgraph property["Property（元数据：Service/Endpoint/Instance）"]
+        p1["文档型存储"]
+        p2["低频率更新"]
+    end
 ```
 
 #### 5.3 数据模型
@@ -307,18 +295,21 @@ BanyanDB 存储引擎设计：
 
 #### 5.4 列式存储的优势
 
-```
-传统行式存储（MySQL）：
-Row 1: [ts=1, svc=A, val=10]
-Row 2: [ts=2, svc=A, val=12]
-Row 3: [ts=3, svc=B, val=8]
+```mermaid
+graph TB
+    subgraph row_store["传统行式存储（MySQL）"]
+        r1["Row 1: ts=1, svc=A, val=10"]
+        r2["Row 2: ts=2, svc=A, val=12"]
+        r3["Row 3: ts=3, svc=B, val=8"]
+    end
 
-BanyanDB 列式存储：
-ts 列:  [1, 2, 3]          → Delta 编码: [1, +1, +1] → 压缩 → 极小
-svc 列: [A, A, B]          → 字典编码: [0, 0, 1] → 压缩 → 极小
-val 列: [10, 12, 8]        → Delta 编码: [10, +2, -4] → 压缩 → 极小
+    subgraph col_store["BanyanDB 列式存储"]
+        ts_col["ts 列: [1, 2, 3] → Delta 编码: [1, +1, +1] → 压缩 → 极小"]
+        svc_col["svc 列: [A, A, B] → 字典编码: [0, 0, 1] → 压缩 → 极小"]
+        val_col["val 列: [10, 12, 8] → Delta 编码: [10, +2, -4] → 压缩 → 极小"]
+    end
 
-压缩比：10x ~ 50x（相比 ES 的索引存储）
+    col_store --> ratio["压缩比：10x ~ 50x（相比 ES 的索引存储）"]
 ```
 
 #### 5.5 配置
@@ -366,39 +357,32 @@ storage:
 
 **选型建议**：
 
-```
-开发测试 → H2
-中小规模生产（< 100 服务） → MySQL
-中大规模生产（100-1000 服务） → Elasticsearch
-大规模生产（> 1000 服务） → BanyanDB（v10+）
+```mermaid
+graph LR
+    dev["开发测试"] --> h2["H2"]
+    small["中小规模生产（< 100 服务）"] --> mysql["MySQL"]
+    mid["中大规模生产（100-1000 服务）"] --> es["Elasticsearch"]
+    large["大规模生产（> 1000 服务）"] --> banyandb["BanyanDB（v10+）"]
 ```
 
 ### 7. TTL 数据清理机制
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  TTL 数据清理流程                                              │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  1. 定时任务（每小时执行一次）                                  │
-│     │                                                        │
-│     ├── 检查 recordDataTTL（默认 3 天）                        │
-│     │   └── 删除 3 天前的 Segment 数据                         │
-│     │                                                        │
-│     ├── 检查 metricsDataTTL（默认 7 天）                       │
-│     │   ├── 删除 7 天前的分钟级指标（L1）                       │
-│     │   ├── 删除 30 天前的小时级指标（L2）                      │
-│     │   └── 删除 365 天前的天级指标（L3）                       │
-│     │                                                        │
-│     └── 检查 logDataTTL（默认 7 天）                           │
-│         └── 删除 7 天前的日志数据                               │
-│                                                              │
-│  2. 清理策略（按存储引擎不同）                                   │
-│     ├── ES：删除整个索引（DELETE /index_name-YYYYMMDD）        │
-│     ├── MySQL：DROP TABLE（按月分表则直接删除整表）              │
-│     └── BanyanDB：自动分区清理（无需手动干预）                   │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    cron["1. 定时任务（每小时执行一次）"]
+    cron --> record_ttl["检查 recordDataTTL（默认 3 天）"]
+    record_ttl --> r1["删除 3 天前的 Segment 数据"]
+    cron --> metrics_ttl["检查 metricsDataTTL（默认 7 天）"]
+    metrics_ttl --> m1["删除 7 天前的分钟级指标（L1）"]
+    metrics_ttl --> m2["删除 30 天前的小时级指标（L2）"]
+    metrics_ttl --> m3["删除 365 天前的天级指标（L3）"]
+    cron --> log_ttl["检查 logDataTTL（默认 7 天）"]
+    log_ttl --> l1["删除 7 天前的日志数据"]
+
+    strategy["2. 清理策略（按存储引擎不同）"]
+    strategy --> es_del["ES：删除整个索引（DELETE /index_name-YYYYMMDD）"]
+    strategy --> mysql_del["MySQL：DROP TABLE（按月分表则直接删除整表）"]
+    strategy --> bdb_del["BanyanDB：自动分区清理（无需手动干预）"]
 ```
 
 **为什么用 DROP 而不是 DELETE？**

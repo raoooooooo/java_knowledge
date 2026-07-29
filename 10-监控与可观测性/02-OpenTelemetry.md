@@ -15,16 +15,23 @@
 
 **可观测性三大支柱**原本各自为政，每家用自己的 SDK：
 
-```
-                应用代码（埋点三套，互不兼容）
-        ┌──────────┬──────────┬──────────┐
-      Metrics      Traces      Logs
-        │            │            │
-   Prometheus    Jaeger/Zipkin   ELK
-     client        client      Logstash
-        │            │            │
-   Prometheus     Jaeger UI      ES/Kibana
-     +Grafana
+```mermaid
+graph TD
+    subgraph app_code["应用代码（埋点三套，互不兼容）"]
+        metrics_client[Metrics]
+        traces_client[Traces]
+        logs_client[Logs]
+    end
+
+    subgraph backend["后端存储与展示"]
+        prom_backend["Prometheus + Grafana"]
+        jaeger_backend["Jaeger UI"]
+        elk_backend["ES / Kibana"]
+    end
+
+    metrics_client -->|"Prometheus client"| prom_backend
+    traces_client -->|"Jaeger/Zipkin client"| jaeger_backend
+    logs_client -->|"ELK Logstash"| elk_backend
 ```
 
 **痛点**：
@@ -56,13 +63,18 @@
 - **Span**：链路里的**一段操作**（一次 RPC、一次 DB 查询）。像物流的每个中转站。
 - 一个 Trace 由多个 Span 组成，Span 之间有父子关系。
 
-```
-Trace（订单请求全链路）:
-  [Gateway Span] 20ms          ← 根Span
-     └─ [OrderService Span] 15ms
-           ├─ [DB Query Span] 5ms      ← 慢在这里！
-           └─ [PayService Span] 8ms
-                 └─ [Http Call Span] 7ms
+```mermaid
+graph TD
+    A["Gateway Span (20ms) — 根Span"]
+    B["OrderService Span (15ms)"]
+    C["DB Query Span (5ms) — 慢在这里！"]
+    D["PayService Span (8ms)"]
+    E["Http Call Span (7ms)"]
+
+    A --> B
+    B --> C
+    B --> D
+    D --> E
 ```
 
 **Span 包含的信息**：操作名、起止时间、状态码、属性（http.method、db.statement）、事件、父 SpanId、traceId。
@@ -83,26 +95,46 @@ Trace（订单请求全链路）:
 
 **`traceparent` 格式**（面试可能要会读）：
 
-```
-traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
-              ↑  ↑────────────────────────────── ↑────────────────── ↑
-            版本          traceId(32位hex)            spanId(16位hex)    采样标志
-           (00)         16字节，全链路唯一           8字节，当前Span       (01=采样)
+```mermaid
+graph LR
+    subgraph traceparent_format["traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"]
+        direction LR
+        version["版本(00)"]
+        traceId["traceId(32位hex)"]
+        spanId["spanId(16位hex)"]
+        flag["采样标志(01=采样)"]
+
+        version ~~~ traceId ~~~ spanId ~~~ flag
+    end
+
+    note["16字节，全链路唯一"] --- traceId
+    note2["8字节，当前Span"] --- spanId
 ```
 
 - **traceId**：16 字节（32 位十六进制），全链路唯一，整条 Trace 不变。
 - **spanId**：8 字节（16 位十六进制），当前这一跳的 Span 标识，每跳不同。
 - **采样标志（trace-flags）**：`01` 表示该链路被采样（要上报），`00` 表示不采样。
 
-```
-服务A(创建Trace，生成traceId，写入请求头traceparent)
-   │  traceparent: 00-<traceId>-<A的spanId>-01
-   ▼
-服务B(从请求头解析出traceparent，取出traceId续上链路，
-      再用自己的spanId替换，继续往下传)
-   │  traceparent: 00-<同一个traceId>-<B的spanId>-01
-   ▼
-服务C(同上……)
+```mermaid
+flowchart TD
+    subgraph service_a["服务A"]
+        A1["创建 Trace，生成 traceId<br/>写入请求头 traceparent"]
+        A2["traceparent: 00-&lt;traceId&gt;-&lt;A的spanId&gt;-01"]
+    end
+
+    subgraph service_b["服务B"]
+        B1["从请求头解析 traceparent<br/>取出 traceId 续上链路<br/>替换为自己的 spanId 继续往下传"]
+        B2["traceparent: 00-&lt;同一个traceId&gt;-&lt;B的spanId&gt;-01"]
+    end
+
+    subgraph service_c["服务C"]
+        C1["（同上……）"]
+    end
+
+    A1 --> A2
+    A2 -->|"HTTP 请求头传播"| B1
+    B1 --> B2
+    B2 -->|"HTTP 请求头传播"| C1
 ```
 
 **传播载体**：HTTP 用请求头，RPC/gRPC 用 metadata，消息队列（Kafka/RabbitMQ）用消息 header。OTel 的各种 instrumenter 自动注入和解析这些头，业务代码通常无感。
@@ -140,15 +172,25 @@ traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
 
 ## 四、OTel 架构（API + SDK + Collector）
 
-```
-   应用进程                              后端（可任意换）
-┌──────────────┐                  ┌──────────────────┐
-│  业务代码    │                  │  Prometheus      │← Metrics
-│      ↓       │   OTLP/HTTP      │  Jaeger/Tempo    │← Traces
-│  OTel API   │ ──────────────►  │  Loki/ES         │← Logs
-│      ↓       │                  │  Grafana 展示    │
-│  OTel SDK    │     或经 Collector│                  │
-└──────────────┘                  └──────────────────┘
+```mermaid
+graph LR
+    subgraph app_process["应用进程"]
+        biz["业务代码"]
+        api["OTel API"]
+        sdk["OTel SDK"]
+        biz --> api --> sdk
+    end
+
+    subgraph backend["后端（可任意换）"]
+        prom["Prometheus — Metrics"]
+        jaeger["Jaeger / Tempo — Traces"]
+        loki["Loki / ES — Logs"]
+        grafana["Grafana 展示"]
+    end
+
+    sdk -->|"OTLP/HTTP 或经 Collector"| prom
+    sdk -->|"OTLP/HTTP 或经 Collector"| jaeger
+    sdk -->|"OTLP/HTTP 或经 Collector"| loki
 ```
 
 **三层分工**：
@@ -160,10 +202,14 @@ traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
 
 像"快递分拣中心"：接收各应用发来的数据，处理后转发给不同后端。
 
-```
-应用 ──► [Receiver 接收] ──► [Processor 处理] ──► [Exporter 导出] ──► 后端
-                                  │
-                          批处理/采样/脱敏/重命名等
+```mermaid
+flowchart LR
+    App["应用"] --> Receiver["Receiver 接收"]
+    Receiver --> Processor["Processor 处理"]
+    Processor --> Exporter["Exporter 导出"]
+    Exporter --> Backend["后端"]
+
+    Processor_note["批处理 / 采样 / 脱敏 / 重命名等"] --- Processor
 ```
 
 | 组件 | 作用 | 例子 |

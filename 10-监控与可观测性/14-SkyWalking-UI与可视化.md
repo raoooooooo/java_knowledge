@@ -6,27 +6,25 @@
 
 SkyWalking UI（RocketBot）是基于 React + Ant Design 构建的单页应用（SPA），通过 **GraphQL API** 与 OAP 通信。
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Browser (React SPA)                                         │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  RocketBot UI                                           │ │
-│  │  ├── Dashboard（仪表盘）                                 │ │
-│  │  ├── Topology（拓扑图）                                  │ │
-│  │  ├── Trace（追踪详情）                                   │ │
-│  │  ├── Log（日志面板）                                     │ │
-│  │  ├── Alarm（告警面板）                                   │ │
-│  │  ├── Profiling（性能剖析）                               │ │
-│  │  └── Settings（设置）                                    │ │
-│  └────────────────────────────────────────────────────────┘ │
-│                          │                                    │
-│              GraphQL API（HTTP POST /graphql）                │
-│                          │                                    │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  OAP Server（端口 12800）                                │
-│  │  └── server-query-plugin（GraphQL 查询引擎）              │
-│  └────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph browser["Browser（React SPA）"]
+        subgraph rocketbot["RocketBot UI"]
+            dash["Dashboard（仪表盘）"]
+            topo["Topology（拓扑图）"]
+            trace["Trace（追踪详情）"]
+            log["Log（日志面板）"]
+            alarm["Alarm（告警面板）"]
+            profiling["Profiling（性能剖析）"]
+            settings["Settings（设置）"]
+        end
+    end
+
+    subgraph oap["OAP Server（端口 12800）"]
+        query_plugin["server-query-plugin（GraphQL 查询引擎）"]
+    end
+
+    rocketbot -- "GraphQL API（HTTP POST /graphql）" --> query_plugin
 ```
 
 ### 2. Dashboard（仪表盘）
@@ -35,74 +33,62 @@ SkyWalking UI（RocketBot）是基于 React + Ant Design 构建的单页应用�
 
 展示所有服务的整体健康状态：
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  SkyWalking Dashboard                                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ 服务总数: 15  │ │ Apdex:   │ │ 平均RT:  │ │ 成功率: 99.5%│  │
-│  │              │ │  0.95    │ │  45ms    │ │              │  │
-│  └──────────────┘ └──────────┘ └──────────┘ └──────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 服务列表                              Apdex  Cpm   RT    │  │
-│  │ ├─ order-service                      0.98   120   35ms  │  │
-│  │ ├─ user-service                       0.95   85    42ms  │  │
-│  │ ├─ inventory-service                  0.92   45    58ms  │  │
-│  │ ├─ payment-service                    0.99   30    28ms  │  │
-│  │ └─ gateway-service                    1.00   200   15ms  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 慢服务 Top 5（按平均响应时间）                              │  │
-│  │ ├─ inventory-service  → 58ms                              │  │
-│  │ ├─ user-service       → 42ms                              │  │
-│  │ └─ order-service      → 35ms                              │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph dash["SkyWalking Dashboard"]
+        kpi1["服务总数: 15"]
+        kpi2["Apdex: 0.95"]
+        kpi3["平均RT: 45ms"]
+        kpi4["成功率: 99.5%"]
+
+        subgraph svc_list["服务列表（Apdex ｜ Cpm ｜ RT）"]
+            s1["order-service — 0.98 ｜ 120 ｜ 35ms"]
+            s2["user-service — 0.95 ｜ 85 ｜ 42ms"]
+            s3["inventory-service — 0.92 ｜ 45 ｜ 58ms"]
+            s4["payment-service — 0.99 ｜ 30 ｜ 28ms"]
+            s5["gateway-service — 1.00 ｜ 200 ｜ 15ms"]
+        end
+
+        subgraph slow_top["慢服务 Top 5（按平均响应时间）"]
+            t1["inventory-service → 58ms"]
+            t2["user-service → 42ms"]
+            t3["order-service → 35ms"]
+        end
+    end
 ```
 
 #### 2.2 服务仪表盘
 
 选定一个服务后，展示该服务的详细指标：
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  order-service 仪表盘                                            │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Apdex               │  │ 响应时间百分位                   │  │
-│  │   0.98              │  │ P50: 15ms  P75: 25ms            │  │
-│  │                     │  │ P90: 35ms  P95: 50ms            │  │
-│  │ ████████████░░░░░   │  │ P99: 100ms                      │  │
-│  └─────────────────────┘  └─────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 端点列表                        QPS    RT    P99   SLA    │  │
-│  │ ├─ GET:/order/{id}              50     10ms  20ms  100%  │  │
-│  │ ├─ POST:/order/create           30     25ms  50ms  99.5% │  │
-│  │ ├─ PUT:/order/update            20     15ms  30ms  100%  │  │
-│  │ └─ DELETE:/order/{id}           10     12ms  25ms  100%  │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 慢端点 Top 5                                              │  │
-│  │ ├─ POST:/order/create  → P99: 50ms                       │  │
-│  │ └─ PUT:/order/update   → P99: 30ms                       │  │
-│  │ └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 实例 JVM 指标                                             │  │
-│  │ ├─ 堆内存: 512MB / 1024MB (50%)                           │  │
-│  │ ├─ GC 次数: Young 15/min, Old 0/min                      │  │
-│  │ ├─ GC 耗时: Young 50ms, Old 0ms                           │  │
-│  │ └─ 线程数: 活跃 45, 峰值 120                              │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph svc_dash["order-service 仪表盘"]
+        subgraph apdex_box["Apdex"]
+            a1["0.98"]
+        end
+        subgraph pct["响应时间百分位"]
+            p1["P50: 15ms ｜ P75: 25ms"]
+            p2["P90: 35ms ｜ P95: 50ms"]
+            p3["P99: 100ms"]
+        end
+        subgraph ep_list["端点列表（QPS ｜ RT ｜ P99 ｜ SLA）"]
+            e1["GET:/order/{id} — 50 ｜ 10ms ｜ 20ms ｜ 100%"]
+            e2["POST:/order/create — 30 ｜ 25ms ｜ 50ms ｜ 99.5%"]
+            e3["PUT:/order/update — 20 ｜ 15ms ｜ 30ms ｜ 100%"]
+            e4["DELETE:/order/{id} — 10 ｜ 12ms ｜ 25ms ｜ 100%"]
+        end
+        subgraph slow_ep["慢端点 Top 5"]
+            se1["POST:/order/create → P99: 50ms"]
+            se2["PUT:/order/update → P99: 30ms"]
+        end
+        subgraph jvm["实例 JVM 指标"]
+            j1["堆内存: 512MB / 1024MB (50%)"]
+            j2["GC 次数: Young 15/min, Old 0/min"]
+            j3["GC 耗时: Young 50ms, Old 0ms"]
+            j4["线程数: 活跃 45, 峰值 120"]
+        end
+    end
 ```
 
 ### 3. Topology（拓扑图）
@@ -111,25 +97,15 @@ SkyWalking UI（RocketBot）是基于 React + Ant Design 构建的单页应用�
 
 自动发现和展示服务之间的调用关系：
 
-```
-         ┌───────────────┐
-         │   Gateway     │
-         │  (gateway)    │
-         └───────┬───────┘
-                 │
-    ┌────────────┼────────────┐
-    │            │            │
-    ▼            ▼            ▼
-┌────────┐ ┌──────────┐ ┌──────────┐
-│ Order  │ │  User    │ │ Inventory│
-│Service │ │ Service  │ │ Service  │
-└───┬────┘ └────┬─────┘ └────┬─────┘
-    │           │            │
-    ▼           ▼            ▼
-┌────────┐ ┌────────┐  ┌────────┐
-│ MySQL  │ │ Redis  │  │ Redis  │
-│ (虚拟) │ │ (虚拟)  │  │ (虚拟)  │
-└────────┘ └────────┘  └────────┘
+```mermaid
+graph TD
+    gateway["Gateway<br/>（gateway）"]
+    gateway --> order["Order Service"]
+    gateway --> user["User Service"]
+    gateway --> inventory["Inventory Service"]
+    order --> mysql["MySQL<br/>（虚拟）"]
+    user --> redis1["Redis<br/>（虚拟）"]
+    inventory --> redis2["Redis<br/>（虚拟）"]
 ```
 
 **拓扑图展示的信息**：
@@ -150,86 +126,78 @@ SkyWalking UI（RocketBot）是基于 React + Ant Design 构建的单页应用�
 
 #### 4.1 Trace 列表
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Trace 列表                                                      │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  时间范围: 2024-07-17 10:00 - 10:15                              │
-│  状态: ☑ 成功  ☑ 错误  最小耗时: 100ms                           │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ Trace ID                    │ 耗时  │ 状态  │ Span 数     │  │
-│  │ ├─ abc...001.1690000000000  │ 150ms │ ✅    │ 12         │  │
-│  │ ├─ abc...002.1690000000000  │ 80ms  │ ✅    │ 8          │  │
-│  │ ├─ abc...003.1690000000000  │ 500ms │ ❌    │ 15         │  │
-│  │ └─ abc...004.1690000000000  │ 120ms │ ✅    │ 10         │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph trace_list["Trace 列表（时间范围: 2024-07-17 10:00 - 10:15 ｜ 状态: 成功 + 错误 ｜ 最小耗时: 100ms）"]
+        t1["abc...001.1690000000000 — 150ms ｜ ✅ 成功 ｜ 12 个 Span"]
+        t2["abc...002.1690000000000 — 80ms ｜ ✅ 成功 ｜ 8 个 Span"]
+        t3["abc...003.1690000000000 — 500ms ｜ ❌ 错误 ｜ 15 个 Span"]
+        t4["abc...004.1690000000000 — 120ms ｜ ✅ 成功 ｜ 10 个 Span"]
+    end
 ```
 
 #### 4.2 Trace 详情——调用树
 
+Trace: abc...001.1690000000000 ｜ 总耗时: 150ms
+
+```mermaid
+graph TD
+    subgraph seg_gw["Gateway（10ms）"]
+        g1["[Entry] GET /api/order → 10ms"]
+        g2["[Exit] POST /order → OrderService → 8ms"]
+    end
+    subgraph seg_order["OrderService（140ms）"]
+        o1["[Entry] POST /order → 140ms"]
+        o2["[Exit] GET /user/123 → UserService → 50ms"]
+        o3["[Exit] SELECT * FROM order WHERE... → MySQL → 30ms"]
+        o4["[Exit] SET order:123 → Redis → 2ms"]
+    end
+    subgraph seg_user["UserService（50ms）"]
+        u1["[Entry] GET /user/123 → 50ms"]
+        u2["[Exit] SELECT * FROM user WHERE id=? → MySQL → 45ms"]
+    end
+    g2 -- "跨进程传播" --> o1
+    o2 -- "跨进程传播" --> u1
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Trace: abc...001.1690000000000  |  总耗时: 150ms                 │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─ Gateway (10ms) ──────────────────────────────────────────┐  │
-│  │  ├─ [Entry] GET /api/order → 10ms                         │  │
-│  │  └─ [Exit]  POST /order → OrderService → 8ms              │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                         │                                        │
-│  ┌─ OrderService (140ms) ────────────────────────────────────┐  │
-│  │  ├─ [Entry] POST /order → 140ms                           │  │
-│  │  ├─ [Exit]  GET /user/123 → UserService → 50ms            │  │
-│  │  ├─ [Exit]  SELECT * FROM order WHERE... → MySQL → 30ms   │  │
-│  │  └─ [Exit]  SET order:123 → Redis → 2ms                   │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                         │                                        │
-│  ┌─ UserService (50ms) ──────────────────────────────────────┐  │
-│  │  ├─ [Entry] GET /user/123 → 50ms                          │  │
-│  │  └─ [Exit]  SELECT * FROM user WHERE id=? → MySQL → 45ms  │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ 时间线视图                                                │  │
-│  │ 0ms   50ms   100ms   150ms                                │  │
-│  │  ├──────┼──────┼──────┤                                   │  │
-│  │  Gateway ██░░░░░░░░░░░░  (10ms)                           │  │
-│  │  OrderService ████████████████████████████████████ (140ms) │  │
-│  │    ├─ UserService ██████████████ (50ms)                   │  │
-│  │    ├─ MySQL ██████████ (30ms)                             │  │
-│  │    └─ Redis █ (2ms)                                       │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+
+时间线视图（0ms - 150ms）：
+
+```mermaid
+gantt
+    title Trace 时间线视图
+    dateFormat x
+    axisFormat %L ms
+    section 调用链
+    Gateway（10ms）: 0, 10
+    OrderService（140ms）: 10, 150
+    UserService（50ms）: 20, 70
+    MySQL（30ms）: 20, 50
+    Redis（2ms）: 20, 22
 ```
 
 #### 4.3 Span 详情
 
 点击一个 Span，可以查看详细信息：
 
-```
 Span 详情：
-├── Span ID: 0
-├── 操作名: GET:/user/123
-├── 类型: Entry
-├── 组件: SpringMVC (ID: 14)
-├── 层级: Http
-├── 耗时: 50ms
-├── 状态: ✅ 成功
-├── Tags:
-│   ├── http.method: GET
-│   ├── http.status_code: 200
-│   ├── url: http://user-service:8080/user/123
-│   └── http.params: id=123
-├── Logs:
-│   ├── [10:00:00.100] start_processing
-│   └── [10:00:00.150] end_processing
-└── 附件事件:
-    └── 无
+
+```mermaid
+graph TD
+    span["Span ID: 0 ｜ 操作名: GET:/user/123"]
+    span --> type["类型: Entry"]
+    span --> comp["组件: SpringMVC（ID: 14）"]
+    span --> layer["层级: Http"]
+    span --> cost["耗时: 50ms"]
+    span --> status["状态: ✅ 成功"]
+    span --> tags["Tags"]
+    tags --> t1["http.method: GET"]
+    tags --> t2["http.status_code: 200"]
+    tags --> t3["url: http://user-service:8080/user/123"]
+    tags --> t4["http.params: id=123"]
+    span --> logs["Logs"]
+    logs --> l1["[10:00:00.100] start_processing"]
+    logs --> l2["[10:00:00.150] end_processing"]
+    span --> events["附件事件: 无"]
 ```
 
 ### 5. Log（日志面板）
@@ -238,12 +206,13 @@ Span 详情：
 
 SkyWalking 支持将 Trace 与日志关联。点击一个 Span，可以查看该 Span 关联的日志：
 
-```
 Trace-Log 关联原理：
-1. Agent 将 TraceId 注入到日志 MDC（Mapped Diagnostic Context）
-2. 日志框架（Logback/Log4j2）在日志中输出 TraceId
-3. OAP 端存储日志，按 TraceId 索引
-4. UI 根据 TraceId 查询关联日志
+
+```mermaid
+graph LR
+    s1["1. Agent 将 TraceId 注入到日志 MDC（Mapped Diagnostic Context）"] --> s2["2. 日志框架（Logback/Log4j2）在日志中输出 TraceId"]
+    s2 --> s3["3. OAP 端存储日志，按 TraceId 索引"]
+    s3 --> s4["4. UI 根据 TraceId 查询关联日志"]
 ```
 
 **Logback 配置示例**：
@@ -259,22 +228,15 @@ Trace-Log 关联原理：
 
 #### 5.2 日志查询
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  日志查询                                                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  服务: order-service  |  端点: POST:/order/create                │
-│  TraceId: abc...001.1690000000000                                │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ [abc...001] 10:00:00.100 INFO  OrderController - 创建订单  │  │
-│  │ [abc...001] 10:00:00.120 INFO  OrderService - 验证库存     │  │
-│  │ [abc...001] 10:00:00.150 ERROR OrderService - 库存不足！    │  │
-│  │ [abc...001] 10:00:00.200 INFO  OrderController - 订单失败   │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph log_query["日志查询（服务: order-service ｜ 端点: POST:/order/create ｜ TraceId: abc...001.1690000000000）"]
+        l1["[abc...001] 10:00:00.100 INFO OrderController - 创建订单"]
+        l2["[abc...001] 10:00:00.120 INFO OrderService - 验证库存"]
+        l3["[abc...001] 10:00:00.150 ERROR OrderService - 库存不足！"]
+        l4["[abc...001] 10:00:00.200 INFO OrderController - 订单失败"]
+        l1 --> l2 --> l3 --> l4
+    end
 ```
 
 ### 6. Profiling（性能剖析）
@@ -283,29 +245,22 @@ Trace-Log 关联原理：
 
 SkyWalking Profiling 通过定期采样线程栈，生成火焰图：
 
+```mermaid
+graph TD
+    main["main（100%）"]
+    main --> filter["doFilter（95%）"]
+    filter --> dispatcher["DispatcherServlet（90%）"]
+    dispatcher --> controller["OrderController.create（80%）"]
+    controller --> service["OrderService.createOrder（75%）"]
+    service --> check["InventoryService.checkStock（60%）"]
+    check --> redis["Redis.get（40%）"]
+    redis --> mysql["MySQL.select（30%）"]
+    mysql --> json["JSON.serialize（10%）"]
+    hotspot["热点分析：checkStock 方法占用 60% 的 CPU 时间，建议优化"]
+    check --> hotspot
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  性能剖析 - 火焰图                                               │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  order-service 线程栈火焰图（采样 100 次，持续 5 分钟）     │  │
-│  │                                                          │  │
-│  │  ██████████████████████████████████  main (100%)          │  │
-│  │  ██████████████████████████████  doFilter (95%)           │  │
-│  │  ██████████████████████████  DispatcherServlet (90%)      │  │
-│  │  ██████████████████████  OrderController.create (80%)     │  │
-│  │  ██████████████████  OrderService.createOrder (75%)       │  │
-│  │  ██████████████  InventoryService.checkStock (60%)        │  │
-│  │  ██████████  Redis.get (40%)                              │  │
-│  │  ██████  MySQL.select (30%)                               │  │
-│  │  ██  JSON.serialize (10%)                                 │  │
-│  │                                                          │  │
-│  │  热点分析：checkStock 方法占用 60% 的 CPU 时间，建议优化    │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+
+order-service 线程栈火焰图（采样 100 次，持续 5 分钟），自上而下为调用栈，宽度对应 CPU 时间占比。
 
 ### 7. Custom Dashboard（自定义仪表盘）
 

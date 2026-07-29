@@ -6,81 +6,54 @@
 
 SkyWalking 的数据上报链路可以归纳为**三条管道 + 四种数据来源**：
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     SkyWalking 数据上报全链路                              │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│  ┌────────────────────────── Agent 端 ──────────────────────────────┐   │
-│  │                                                                    │   │
-│  │  业务应用 (Java Agent)                                              │   │
-│  │  │                                                                 │   │
-│  │  ├── ① Trace 数据 (Segment/Span)  ──────────┐                     │   │
-│  │  │   • 调用链原始数据，每个请求一个 Segment      │                     │   │
-│  │  │   • 请求驱动，有请求才有数据                 │                     │   │
-│  │  │                                           │                     │   │
-│  │  ├── ② JVM 指标 (Metrics)  ──────────────────┤                     │   │
-│  │  │   • 内存、GC、CPU、线程                     │                     │   │
-│  │  │   • 定时采集（每 30s），非请求驱动           │                     │   │
-│  │  │                                           │    gRPC (:11800)    │   │
-│  │  └── ③ 日志 (Log)  ──────────────────────────┤   或 Kafka          │   │
-│  │      • logback/log4j bridge 注入 traceId      │                     │   │
-│  │      • 与调用链关联                            │                     │   │
-│  │                                              │                     │   │
-│  └──────────────────────────────────────────────┼─────────────────────┘   │
-│                                                  │                        │
-│  ┌────────────────── 外部数据源 ──────────────────┤──────────────────┐   │
-│  │                                               │                   │   │
-│  │  ④ Meter 自定义指标 ───────────────────────────┘                   │   │
-│  │  • OTel Metrics ──── OTLP (:4317) ────┐                           │   │
-│  │  • Prometheus ────── HTTP Pull ───────┤                           │   │
-│  │  • Micrometer ────── 桥接 ────────────┤                           │   │
-│  │  • Telegraf/Zabbix ─ Receiver ────────┤                           │   │
-│  │                                        │                           │   │
-│  └────────────────────────────────────────┼───────────────────────────┘   │
-│                                            │                              │
-│  ┌─────── OAP 端 ──────────────────────────┼─────────────────────────┐   │
-│  │                                         ▼                          │   │
-│  │  ┌──────────────────────────────────────────────────────────────┐ │   │
-│  │  │  Receiver 接收层                                              │ │   │
-│  │  │  ├── TraceReceiver (gRPC/Kafka)  ← 接收 Agent 的 ①②③       │ │   │
-│  │  │  └── OTLPReceiver (gRPC :4317)   ← 接收 OTel 三信号          │ │   │
-│  │  └──────────────────────────────────────────────────────────────┘ │   │
-│  │                              │                                     │   │
-│  │  ┌───────────────────────────┼──────────────────────────────────┐ │   │
-│  │  │  DataCarrier（内存队列，Disruptor RingBuffer）                 │ │   │
-│  │  │  ├── TraceBuffer    ├── MetricsBuffer                         │ │   │
-│  │  │  ├── LogBuffer       └── EventBuffer                          │ │   │
-│  │  └───────────────────────────┼──────────────────────────────────┘ │   │
-│  │                              │ 批量消费                             │   │
-│  │         ┌────────────────────┼────────────────────┐               │   │
-│  │         ▼                    ▼                     ▼              │   │
-│  │  ┌────────────────────────────────────────────────────────────┐  │   │
-│  │  │                    三条分析管道                              │  │   │
-│  │  │                                                            │  │   │
-│  │  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │  │   │
-│  │  │  │ ① Trace 管道  │  │ ② Metrics    │  │ ③ Log 管道   │     │  │   │
-│  │  │  │              │  │   管道        │  │              │     │  │   │
-│  │  │  │ TraceAnalyzer│  │              │  │ LogAnalyzer  │     │  │   │
-│  │  │  │     ↓        │  │ ② JVM 指标   │  │     ↓        │     │  │   │
-│  │  │  │ OAL 引擎     │  │   直接存储    │  │ LAL 引擎     │     │  │   │
-│  │  │  │     ↓        │  │              │  │     ↓        │     │  │   │
-│  │  │  │ Trace 指标   │  │ ④ Meter      │  │ 日志指标     │     │  │   │
-│  │  │  │ (service_cpm,│  │   MAL 引擎   │  │ 日志记录     │     │  │   │
-│  │  │  │  endpoint_   │  │     ↓        │  │              │     │  │   │
-│  │  │  │  p99,        │  │ Meter 指标   │  │              │     │  │   │
-│  │  │  │  apdex...)   │  │ (自定义)     │  │              │     │  │   │
-│  │  │  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │  │   │
-│  │  └─────────┼─────────────────┼─────────────────┼─────────────┘  │   │
-│  │            │                 │                 │                 │   │
-│  │            ▼                 ▼                 ▼                 │   │
-│  │  ┌────────────────────────────────────────────────────────────┐  │   │
-│  │  │  Storage 存储层 (H2 / MySQL / ES / BanyanDB)                │  │   │
-│  │  └────────────────────────────────────────────────────────────┘  │   │
-│  │                                                                   │   │
-│  └───────────────────────────────────────────────────────────────────┘   │
-│                                                                          │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph agent_side["Agent 端"]
+        subgraph biz_app["业务应用（Java Agent）"]
+            trace_data["① Trace 数据（Segment/Span）<br/>调用链原始数据，每个请求一个 Segment<br/>请求驱动，有请求才有数据"]
+            jvm_data["② JVM 指标（Metrics）<br/>内存、GC、CPU、线程<br/>定时采集（每 30s），非请求驱动"]
+            log_data["③ 日志（Log）<br/>logback/log4j bridge 注入 traceId<br/>与调用链关联"]
+        end
+    end
+
+    subgraph external["外部数据源"]
+        meter_data["④ Meter 自定义指标"]
+        otel_src["OTel Metrics ── OTLP（:4317）"]
+        prom_src["Prometheus ── HTTP Pull"]
+        micro_src["Micrometer ── 桥接"]
+        telegraf_src["Telegraf/Zabbix ── Receiver"]
+        otel_src --> meter_data
+        prom_src --> meter_data
+        micro_src --> meter_data
+        telegraf_src --> meter_data
+    end
+
+    subgraph oap_side["OAP 端"]
+        subgraph receiver_layer["Receiver 接收层"]
+            trace_receiver["TraceReceiver（gRPC/Kafka）<br/>← 接收 Agent 的 ①②③"]
+            otlp_receiver["OTLPReceiver（gRPC :4317）<br/>← 接收 OTel 三信号"]
+        end
+        subgraph datacarrier["DataCarrier（内存队列，Disruptor RingBuffer）"]
+            buffers["TraceBuffer ｜ MetricsBuffer ｜ LogBuffer ｜ EventBuffer"]
+        end
+        subgraph pipelines["三条分析管道"]
+            trace_pipe["① Trace 管道<br/>TraceAnalyzer ↓ OAL 引擎 ↓<br/>Trace 指标（service_cpm, endpoint_p99, apdex...）"]
+            metrics_pipe["② Metrics 管道<br/>② JVM 指标 → 直接存储<br/>④ Meter → MAL 引擎 ↓<br/>Meter 指标（自定义）"]
+            log_pipe["③ Log 管道<br/>LogAnalyzer ↓ LAL 引擎 ↓<br/>日志指标、日志记录"]
+        end
+        storage["Storage 存储层（H2 / MySQL / ES / BanyanDB）"]
+    end
+
+    trace_data -- "gRPC（:11800）或 Kafka" --> trace_receiver
+    jvm_data -- "gRPC（:11800）或 Kafka" --> trace_receiver
+    log_data -- "gRPC（:11800）或 Kafka" --> trace_receiver
+    meter_data --> otlp_receiver
+    trace_receiver --> datacarrier
+    otlp_receiver --> datacarrier
+    datacarrier -- "批量消费" --> pipelines
+    trace_pipe --> storage
+    metrics_pipe --> storage
+    log_pipe --> storage
 ```
 
 **管道汇总**：
@@ -132,15 +105,16 @@ SkyWalking 的数据上报链路可以归纳为**三条管道 + 四种数据来�
 
   特点：Agent 主动选 OAP，不需要 LB 中间件，简单
   问题：连接分布可能不均，某个 OAP 可能被过多 Agent 选中
+```
 
 方案B：服务端负载均衡（L4/L7 负载均衡器）
-  Agent -> Nginx/LB -> OAP 集群
 
-  ┌────────┐     ┌─────────┐     ┌──────────┐
-  │ Agent  │────>│  Nginx  │────>│ OAP 集群  │
-  └────────┘     │ (L4 LB) │     │ (多个节点)│
-                 └─────────┘     └──────────┘
+```mermaid
+graph LR
+    agent["Agent"] --> nginx["Nginx（L4 LB）"] --> oap_cluster["OAP 集群（多个节点）"]
+```
 
+```
   特点：Nginx 按连接数/轮询分发，连接分布均匀
   注意：gRPC 基于 HTTP/2，LB 要支持 HTTP/2（Nginx 1.13.10+）
 ```
@@ -242,33 +216,18 @@ HTTP 短连接的问题：
 
 #### 3.1 通信模型
 
-```
-Agent 端                                    OAP 端
-  │                                           │
-  │ ① ServiceRegister  (服务注册)              │
-  │──────────────────────────────────────────→│
-  │                    注册成功，返回 ServiceId  │
-  │←──────────────────────────────────────────│
-  │                                           │
-  │ ② ServiceInstanceRegister (实例注册)       │
-  │──────────────────────────────────────────→│
-  │                 注册成功，返回 InstanceId   │
-  │←──────────────────────────────────────────│
-  │                                           │
-  │ ③ KeepAlive (心跳，每 30 秒)               │
-  │──────────────────────────────────────────→│
-  │                                           │
-  │ ④ TraceSegmentReport (上报 Segment)        │
-  │──────────────────────────────────────────→│
-  │   (流式上报，持续发送)                       │
-  │                                           │
-  │ ⑤ JVMMetricReport (上报 JVM 指标)          │
-  │──────────────────────────────────────────→│
-  │   (每 30 秒上报一次)                        │
-  │                                           │
-  │ ⑥ LogReport (上报日志)                     │
-  │──────────────────────────────────────────→│
-  │                                           │
+```mermaid
+sequenceDiagram
+    participant A as Agent 端
+    participant O as OAP 端
+    A->>O: ① ServiceRegister（服务注册）
+    O-->>A: 注册成功，返回 ServiceId
+    A->>O: ② ServiceInstanceRegister（实例注册）
+    O-->>A: 注册成功，返回 InstanceId
+    A->>O: ③ KeepAlive（心跳，每 30 秒）
+    A->>O: ④ TraceSegmentReport（上报 Segment，流式上报，持续发送）
+    A->>O: ⑤ JVMMetricReport（上报 JVM 指标，每 30 秒一次）
+    A->>O: ⑥ LogReport（上报日志）
 ```
 
 #### 3.2 Agent 注册流程
@@ -288,15 +247,12 @@ Agent 端                                    OAP 端
 
 #### 4.2 Kafka 桥接架构
 
-```
-┌──────────┐    ┌──────────┐          ┌─────────────┐
-│  Agent 1 │───→│          │─────────→│  OAP 1 (消费)│
-└──────────┘    │          │          └─────────────┘
-                │  Kafka   │
-┌──────────┐    │  Topic:  │          ┌─────────────┐
-│  Agent 2 │───→│  sw-trace│─────────→│  OAP 2 (消费)│
-└──────────┘    │          │          └─────────────┘
-                └─────────────┘
+```mermaid
+graph LR
+    agent1["Agent 1"] --> kafka["Kafka<br/>Topic: sw-trace"]
+    agent2["Agent 2"] --> kafka
+    kafka --> oap1["OAP 1（消费）"]
+    kafka --> oap2["OAP 2（消费）"]
 ```
 
 #### 4.3 Kafka Fetcher 配置
@@ -321,17 +277,19 @@ kafka-fetcher-plugin:
 
 DataCarrier 是 SkyWalking OAP 中的**高性能内存队列**，用于解耦数据接收和数据分析：
 
-```
-                         ┌─────────────────────────────────┐
-                         │         DataCarrier              │
-gRPC Receiver ──────────→│  ┌───────────────────────────┐  │──→ Analyzer
-(接收线程)               │  │  Disruptor RingBuffer       │  │    (分析线程)
-                         │  │  ├── Channel 0 (Trace)      │  │
-                         │  │  ├── Channel 1 (Metrics)    │  │
-                         │  │  ├── Channel 2 (Logs)       │  │
-                         │  │  └── Channel 3 (Events)     │  │
-                         │  └───────────────────────────┘  │
-                         └─────────────────────────────────┘
+```mermaid
+graph LR
+    receiver["gRPC Receiver<br/>（接收线程）"]
+    subgraph datacarrier["DataCarrier"]
+        subgraph ringbuffer["Disruptor RingBuffer"]
+            ch0["Channel 0（Trace）"]
+            ch1["Channel 1（Metrics）"]
+            ch2["Channel 2（Logs）"]
+            ch3["Channel 3（Events）"]
+        end
+    end
+    analyzer["Analyzer<br/>（分析线程）"]
+    receiver --> datacarrier --> analyzer
 ```
 
 **为什么用 RingBuffer？**
@@ -341,14 +299,15 @@ gRPC Receiver ──────────→│  ┌────────�
 
 #### 5.2 背压机制
 
-```
-当 DataCarrier 满时：
-  1. 接收线程尝试写入 → 失败
-  2. 根据策略处理：
-     ┌── BLOCKING（阻塞）：等待直到有空间
-     ├── IF_POSSIBLE（尽力）：写入失败则丢弃
-     └── OVERRIDE（覆盖）：覆盖最旧的数据
-  3. 默认策略：IF_POSSIBLE（不阻塞 OAP 接收线程）
+```mermaid
+graph TD
+    full["当 DataCarrier 满时"]
+    full --> s1["1. 接收线程尝试写入 → 失败"]
+    s1 --> s2{"2. 根据策略处理"}
+    s2 --> blocking["BLOCKING（阻塞）：等待直到有空间"]
+    s2 --> if_possible["IF_POSSIBLE（尽力）：写入失败则丢弃"]
+    s2 --> override["OVERRIDE（覆盖）：覆盖最旧的数据"]
+    s2 --> default["3. 默认策略：IF_POSSIBLE（不阻塞 OAP 接收线程）"]
 ```
 
 ### 6. 批量处理与 Buffer
@@ -357,22 +316,22 @@ gRPC Receiver ──────────→│  ┌────────�
 
 Agent 端的 Trace Segment 不是每个 Span 立即上报，而是等到整个 Segment 完成后再上报：
 
-```
 Agent 端：
-  Span 创建 → Span 完成 → 放入 TracingContext
-     ↓
-  Segment 所有 Span 完成 → 序列化 Segment → 放入 TraceBuffer
-     ↓
-  TraceBuffer 攒够一批 → 批量上报到 OAP（gRPC 流式发送）
+
+```mermaid
+graph LR
+    s1["Span 创建"] --> s2["Span 完成"] --> s3["放入 TracingContext"]
+    s3 --> s4["Segment 所有 Span 完成"] --> s5["序列化 Segment"] --> s6["放入 TraceBuffer"]
+    s6 --> s7["TraceBuffer 攒够一批"] --> s8["批量上报到 OAP（gRPC 流式发送）"]
 ```
 
 #### 6.2 LogBuffer
 
-```
 Agent 端：
-  Log 事件 → 放入 LogBuffer
-     ↓
-  LogBuffer 攒够一批 → 批量上报到 OAP
+
+```mermaid
+graph LR
+    l1["Log 事件"] --> l2["放入 LogBuffer"] --> l3["LogBuffer 攒够一批"] --> l4["批量上报到 OAP"]
 ```
 
 ---

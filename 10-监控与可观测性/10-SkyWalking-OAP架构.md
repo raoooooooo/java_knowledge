@@ -6,21 +6,17 @@
 
 **OAP（Observability Analysis Platform，可观测性分析平台）** 是 SkyWalking 的后端核心，负责接收、分析、聚合、存储和查询所有可观测性数据。
 
-```
 OAP 的职责：
-┌──────────────────────────────────────────────────────────────┐
-│                         OAP Server                           │
-│                                                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐ │
-│  │ 接收数据  │→│ 解析分析  │→│ 指标聚合  │→│ 存储持久化  │ │
-│  │ (Receiver)│  │(Analyzer)│  │(OAL引擎) │  │(Storage)   │ │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────┘ │
-│                                                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────────────┐  │
-│  │ 查询数据  │  │ 告警判定  │  │ 集群管理/健康检查/遥测    │  │
-│  │ (Query)  │  │ (Alarm)  │  │ (Cluster/Health/Telemetry)│  │
-│  └──────────┘  └──────────┘  └──────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
+
+```mermaid
+graph TB
+    subgraph oap["OAP Server"]
+        direction TB
+        receiver["接收数据<br/>（Receiver）"] --> analyzer["解析分析<br/>（Analyzer）"] --> aggregator["指标聚合<br/>（OAL引擎）"] --> storage["存储持久化<br/>（Storage）"]
+        query["查询数据<br/>（Query）"]
+        alarm["告警判定<br/>（Alarm）"]
+        cluster["集群管理/健康检查/遥测<br/>（Cluster/Health/Telemetry）"]
+    end
 ```
 
 ### 2. 模块化架构设计
@@ -29,24 +25,22 @@ SkyWalking OAP 采用**模块化（Module）架构**，基于 Java SPI 机制实
 
 #### 2.1 ModuleDefine 与 ModuleProvider
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    模块化架构设计                              │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ModuleDefine（模块定义）                                      │
-│  ├── name()：模块名称                                         │
-│  ├── services()：模块提供的服务接口                             │
-│  └── requiredModules()：依赖的其他模块                         │
-│                                                              │
-│  ModuleProvider（模块实现）                                     │
-│  ├── name()：实现名称                                         │
-│  ├── module()：所属模块                                       │
-│  ├── prepare()：准备阶段（初始化配置）                          │
-│  ├── start()：启动阶段（启动服务）                              │
-│  └── notifyAfterCompleted()：所有模块启动完成后的回调            │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph modular["模块化架构设计"]
+        subgraph define["ModuleDefine（模块定义）"]
+            d1["name()：模块名称"]
+            d2["services()：模块提供的服务接口"]
+            d3["requiredModules()：依赖的其他模块"]
+        end
+        subgraph provider["ModuleProvider（模块实现）"]
+            p1["name()：实现名称"]
+            p2["module()：所属模块"]
+            p3["prepare()：准备阶段（初始化配置）"]
+            p4["start()：启动阶段（启动服务）"]
+            p5["notifyAfterCompleted()：所有模块启动完成后的回调"]
+        end
+    end
 ```
 
 **源码示例**：
@@ -103,60 +97,61 @@ public class CoreModuleProvider extends ModuleProvider {
 
 #### 2.2 OAP 核心模块全景
 
-```
-oap-server/
-├── server-core/              # 核心模块（数据模型、Source、Scope定义）
-├── server-library/           # 共享库（模块系统、工具类、BanyanDB客户端）
-├── server-receiver-plugin/   # 数据接收插件
-│   ├── skywalking-trace-receiver-plugin    # Trace 接收
-│   ├── skywalking-meter-receiver-plugin    # Meter 接收
-│   ├── skywalking-log-receiver-plugin      # Log 接收
-│   ├── skywalking-event-receiver-plugin    # Event 接收
-│   ├── skywalking-browser-receiver-plugin  # 浏览器数据接收
-│   ├── skywalking-jvm-receiver-plugin      # JVM 指标接收
-│   ├── skywalking-profile-receiver-plugin  # Profiling 数据接收
-│   ├── skywalking-management-receiver-plugin  # 管理接口
-│   ├── otel-receiver-plugin                # OpenTelemetry OTLP 接收
-│   ├── zipkin-receiver-plugin              # Zipkin 兼容接收
-│   ├── envoy-metrics-receiver-plugin       # Envoy ALS 接收
-│   ├── skywalking-ebpf-receiver-plugin     # eBPF 数据接收
-│   └── ...                                 # 更多接收器
-├── server-storage-plugin/    # 存储插件
-│   ├── storage-banyandb-plugin             # BanyanDB 存储
-│   ├── storage-elasticsearch-plugin        # Elasticsearch 存储
-│   └── storage-jdbc-hikaricp-plugin        # JDBC 存储（MySQL/H2/PostgreSQL）
-├── server-query-plugin/      # 查询插件（GraphQL）
-├── server-alarm-plugin/      # 告警插件
-├── server-cluster-plugin/    # 集群协调插件
-│   ├── zookeeper                           # ZooKeeper
-│   ├── kubernetes                          # K8s API
-│   ├── nacos                               # Nacos
-│   └── consul                              # Consul
-├── server-configuration/     # 动态配置
-│   ├── apollo                              # Apollo
-│   ├── nacos                               # Nacos
-│   ├── zookeeper                           # ZooKeeper
-│   └── consul                              # Consul
-├── server-fetcher-plugin/    # 数据拉取插件
-│   ├── prometheus-fetcher-plugin           # Prometheus 拉取
-│   └── kafka-fetcher-plugin                # Kafka 消费
-├── analyzer/                 # 分析引擎
-│   ├── agent-analyzer                      # Agent 数据分析
-│   ├── meter-analyzer                      # Meter 数据分析
-│   ├── log-analyzer                        # 日志分析
-│   ├── event-analyzer                      # 事件分析
-│   ├── gen-ai-analyzer                     # AI 数据分析
-│   └── hierarchy                           # 层级关系分析
-├── oal-grammar/              # OAL 语法定义
-├── oal-rt/                   # OAL 运行时
-├── mqe-grammar/              # MQE 查询语法
-├── mqe-rt/                   # MQE 运行时
-├── server-telemetry/         # OAP 自监控
-├── server-testing/           # 测试工具
-├── server-tools/             # 独立工具（Profile Exporter 等）
-├── ai-pipeline/              # AI 管道
-├── exporter/                 # 数据导出
-└── server-starter/           # 启动入口
+```mermaid
+mindmap
+  root((oap-server/))
+    server-core/（核心模块：数据模型、Source、Scope定义）
+    server-library/（共享库：模块系统、工具类、BanyanDB客户端）
+    server-receiver-plugin/（数据接收插件）
+      skywalking-trace-receiver-plugin（Trace 接收）
+      skywalking-meter-receiver-plugin（Meter 接收）
+      skywalking-log-receiver-plugin（Log 接收）
+      skywalking-event-receiver-plugin（Event 接收）
+      skywalking-browser-receiver-plugin（浏览器数据接收）
+      skywalking-jvm-receiver-plugin（JVM 指标接收）
+      skywalking-profile-receiver-plugin（Profiling 数据接收）
+      skywalking-management-receiver-plugin（管理接口）
+      otel-receiver-plugin（OpenTelemetry OTLP 接收）
+      zipkin-receiver-plugin（Zipkin 兼容接收）
+      envoy-metrics-receiver-plugin（Envoy ALS 接收）
+      skywalking-ebpf-receiver-plugin（eBPF 数据接收）
+      ...（更多接收器）
+    server-storage-plugin/（存储插件）
+      storage-banyandb-plugin（BanyanDB 存储）
+      storage-elasticsearch-plugin（Elasticsearch 存储）
+      storage-jdbc-hikaricp-plugin（JDBC 存储：MySQL/H2/PostgreSQL）
+    server-query-plugin/（查询插件：GraphQL）
+    server-alarm-plugin/（告警插件）
+    server-cluster-plugin/（集群协调插件）
+      zookeeper
+      kubernetes（K8s API）
+      nacos
+      consul
+    server-configuration/（动态配置）
+      apollo
+      nacos
+      zookeeper
+      consul
+    server-fetcher-plugin/（数据拉取插件）
+      prometheus-fetcher-plugin（Prometheus 拉取）
+      kafka-fetcher-plugin（Kafka 消费）
+    analyzer/（分析引擎）
+      agent-analyzer（Agent 数据分析）
+      meter-analyzer（Meter 数据分析）
+      log-analyzer（日志分析）
+      event-analyzer（事件分析）
+      gen-ai-analyzer（AI 数据分析）
+      hierarchy（层级关系分析）
+    oal-grammar/（OAL 语法定义）
+    oal-rt/（OAL 运行时）
+    mqe-grammar/（MQE 查询语法）
+    mqe-rt/（MQE 运行时）
+    server-telemetry/（OAP 自监控）
+    server-testing/（测试工具）
+    server-tools/（独立工具：Profile Exporter 等）
+    ai-pipeline/（AI 管道）
+    exporter/（数据导出）
+    server-starter/（启动入口）
 ```
 
 ### 3. 集群部署架构
@@ -173,31 +168,18 @@ SkyWalking v9+ 支持三种集群角色：
 
 #### 3.2 集群部署架构
 
-```
-                         ┌──────────────┐
-                         │   UI (LB)    │
-                         └──────┬───────┘
-                                │
-              ┌─────────────────┼─────────────────┐
-              │                 │                 │
-     ┌────────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
-     │ OAP Receiver  │  │OAP Receiver  │  │OAP Receiver  │
-     │  (接收数据)    │  │  (接收数据)    │  │  (接收数据)    │
-     └────────┬──────┘  └───────┬──────┘  └───────┬──────┘
-              │                 │                 │
-              │  gRPC 转发      │  gRPC 转发      │  gRPC 转发
-              │                 │                 │
-     ┌────────▼──────┐  ┌───────▼──────┐  ┌───────▼──────┐
-     │OAP Aggregator  │  │OAP Aggregator│  │OAP Aggregator│
-     │  (聚合计算)     │  │  (聚合计算)    │  │  (聚合计算)    │
-     └────────┬──────┘  └───────┬──────┘  └───────┬──────┘
-              │                 │                 │
-              └─────────────────┼─────────────────┘
-                                │
-                       ┌────────▼──────┐
-                       │  Storage 集群  │
-                       │ (BanyanDB/ES) │
-                       └───────────────┘
+```mermaid
+graph TD
+    ui["UI（LB）"]
+    ui --> r1["OAP Receiver<br/>（接收数据）"]
+    ui --> r2["OAP Receiver<br/>（接收数据）"]
+    ui --> r3["OAP Receiver<br/>（接收数据）"]
+    r1 -- "gRPC 转发" --> ag1["OAP Aggregator<br/>（聚合计算）"]
+    r2 -- "gRPC 转发" --> ag2["OAP Aggregator<br/>（聚合计算）"]
+    r3 -- "gRPC 转发" --> ag3["OAP Aggregator<br/>（聚合计算）"]
+    ag1 --> storage["Storage 集群<br/>（BanyanDB / ES）"]
+    ag2 --> storage
+    ag3 --> storage
 ```
 
 #### 3.3 水平扩展策略
@@ -213,32 +195,28 @@ SkyWalking v9+ 支持三种集群角色：
 
 ### 4. 启动流程
 
-```
-OAP 启动流程（BootstrapFlow）：
-  │
-  ├── 1. 加载 application.yml 配置
-  │     ├── 解析 cluster 配置（集群模式）
-  │     ├── 解析 core 配置（存储选择）
-  │     └── 解析各模块配置
-  │
-  ├── 2. 初始化 ModuleManager
-  │     ├── 扫描 SPI 注册的 ModuleDefine
-  │     ├── 扫描 SPI 注册的 ModuleProvider
-  │     └── 根据配置选择 Provider
-  │
-  ├── 3. 模块准备（prepare 阶段）
-  │     ├── 按依赖顺序调用每个 ModuleProvider.prepare()
-  │     ├── 注册服务实现
-  │     └── 验证依赖关系
-  │
-  ├── 4. 模块启动（start 阶段）
-  │     ├── 按依赖顺序调用每个 ModuleProvider.start()
-  │     ├── 启动 gRPC 服务（端口 11800）
-  │     ├── 启动 HTTP 服务（端口 12800，GraphQL）
-  │     └── 启动定时任务（指标聚合、TTL 清理等）
-  │
-  └── 5. 通知完成（notifyAfterCompleted）
-        └── 所有模块启动完成后，通知各模块
+```mermaid
+graph TD
+    boot["OAP 启动流程（BootstrapFlow）"]
+    boot --> step1["1. 加载 application.yml 配置"]
+    step1 --> s11["解析 cluster 配置（集群模式）"]
+    step1 --> s12["解析 core 配置（存储选择）"]
+    step1 --> s13["解析各模块配置"]
+    boot --> step2["2. 初始化 ModuleManager"]
+    step2 --> s21["扫描 SPI 注册的 ModuleDefine"]
+    step2 --> s22["扫描 SPI 注册的 ModuleProvider"]
+    step2 --> s23["根据配置选择 Provider"]
+    boot --> step3["3. 模块准备（prepare 阶段）"]
+    step3 --> s31["按依赖顺序调用每个 ModuleProvider.prepare()"]
+    step3 --> s32["注册服务实现"]
+    step3 --> s33["验证依赖关系"]
+    boot --> step4["4. 模块启动（start 阶段）"]
+    step4 --> s41["按依赖顺序调用每个 ModuleProvider.start()"]
+    step4 --> s42["启动 gRPC 服务（端口 11800）"]
+    step4 --> s43["启动 HTTP 服务（端口 12800，GraphQL）"]
+    step4 --> s44["启动定时任务（指标聚合、TTL 清理等）"]
+    boot --> step5["5. 通知完成（notifyAfterCompleted）"]
+    step5 --> s51["所有模块启动完成后，通知各模块"]
 ```
 
 ### 5. 核心通信机制
@@ -292,30 +270,30 @@ OAP 启动流程（BootstrapFlow）：
 
 OAP 收到数据后，不会立即分析，而是先丢进 **DataCarrier**（基于 Disruptor RingBuffer 的内存队列）：
 
-```
-Agent 上报数据（gRPC）
-        │
-        ▼
-┌──────────────────────────────────────────────┐
-│  Receiver 接收线程                              │
-│  ├── 反序列化                                  │
-│  └── 丢进 DataCarrier（内存队列）               │
-│      ┌──────────────────────────────────┐    │
-│      │  DataCarrier（Disruptor RingBuffer）│    │
-│      │  ├── TraceBuffer（调用链缓冲）     │    │  ← 这就是"数据缓存"！
-│      │  ├── MetricsBuffer（指标缓冲）     │    │
-│      │  ├── LogBuffer（日志缓冲）         │    │
-│      │  └── EventBuffer（事件缓冲）       │    │
-│      └──────────────────────────────────┘    │
-└──────────────────────────────────────────────┘
-        │
-        ▼（批量消费）
-┌──────────────────────────────────────────────┐
-│  Analyzer 分析线程                              │
-│  ├── TraceAnalyzer -> OAL 聚合               │
-│  ├── MeterAnalyzer -> MAL 聚合               │
-│  └── LogAnalyzer -> LAL 分析                 │
-└──────────────────────────────────────────────┘
+```mermaid
+graph TB
+    agent["Agent 上报数据（gRPC）"]
+
+    subgraph receiver["Receiver 接收线程"]
+        deserialize["反序列化"]
+        deserialize --> carrier["丢进 DataCarrier（内存队列）"]
+        subgraph datacarrier["DataCarrier（Disruptor RingBuffer）—— 这就是「数据缓存」！"]
+            trace_buf["TraceBuffer（调用链缓冲）"]
+            metrics_buf["MetricsBuffer（指标缓冲）"]
+            log_buf["LogBuffer（日志缓冲）"]
+            event_buf["EventBuffer（事件缓冲）"]
+        end
+        carrier --> datacarrier
+    end
+
+    subgraph analyzer["Analyzer 分析线程（批量消费）"]
+        trace_analyzer["TraceAnalyzer → OAL 聚合"]
+        meter_analyzer["MeterAnalyzer → MAL 聚合"]
+        log_analyzer["LogAnalyzer → LAL 分析"]
+    end
+
+    agent --> deserialize
+    datacarrier --> analyzer
 ```
 
 **DataCarrier 为什么能替代 Kafka 做瞬时缓冲？**
@@ -352,15 +330,13 @@ Agent 上报数据（gRPC）
 
 **Kafka 模式架构（可选）**：
 
+```mermaid
+graph LR
+    agent["Agent（生产者）"] -- "gRPC" --> kafka["Kafka（缓冲）"]
+    oap["OAP（Fetcher）"] -- "消费（消费组）" --> kafka
 ```
-┌──────────┐         ┌─────────┐         ┌──────────┐
-│  Agent   │──gRPC──>│  Kafka  │<──消费──│   OAP    │
-│（生产者） │         │ (缓冲)  │  (消费组)│ (Fetcher)│
-└──────────┘         └─────────┘         └──────────┘
 
-Agent 不直接连 OAP，而是写到 Kafka
-OAP 用 kafka-fetcher-plugin 从 Kafka 消费数据
-```
+Agent 不直接连 OAP，而是写到 Kafka；OAP 用 kafka-fetcher-plugin 从 Kafka 消费数据。
 
 ---
 

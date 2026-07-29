@@ -15,30 +15,31 @@
 
 **下载地址**：[https://skywalking.apache.org/downloads/](https://skywalking.apache.org/downloads/)
 
-```
-apache-skywalking-apm-x.x.x/
-├── bin/                          # 启动脚本
-│   ├── oapService.sh            # OAP Server 启动脚本
-│   ├── oapServiceInit.sh        # OAP Server 初始化（创建存储表结构）
-│   ├── oapServiceNoInit.sh      # 不初始化直接启动
-│   ├── webappService.sh         # UI 启动脚本
-│   └── startup.sh               # 一键启动（OAP + UI）
-├── config/                       # 配置文件
-│   ├── application.yml          # OAP 核心配置
-│   ├── log4j2.xml               # 日志配置
-│   ├── alarm-settings.yml       # 告警规则配置
-│   ├── oal/                     # OAL 指标聚合脚本
-│   │   ├── core.oal             # 核心指标定义
-│   │   ├── browser.oal          # 浏览器监控指标
-│   │   └── ...
-│   ├── mal/                     # MAL 指标分析脚本
-│   ├── lal/                     # LAL 日志分析脚本
-│   └── meter-analyzer-config/   # Meter 指标配置
-├── oap-libs/                    # OAP 依赖库
-├── webapp/                      # UI 前端资源
-├── agents/                      # 探针目录
-│   └── skywalking-agent.jar     # Java Agent JAR
-└── licenses/                    # 许可证文件
+```mermaid
+mindmap
+  root((apache-skywalking-apm-x.x.x/))
+    bin/（启动脚本）
+      oapService.sh（OAP Server 启动脚本）
+      oapServiceInit.sh（OAP Server 初始化：创建存储表结构）
+      oapServiceNoInit.sh（不初始化直接启动）
+      webappService.sh（UI 启动脚本）
+      startup.sh（一键启动：OAP + UI）
+    config/（配置文件）
+      application.yml（OAP 核心配置）
+      log4j2.xml（日志配置）
+      alarm-settings.yml（告警规则配置）
+      oal/（OAL 指标聚合脚本）
+        core.oal（核心指标定义）
+        browser.oal（浏览器监控指标）
+        ...
+      mal/（MAL 指标分析脚本）
+      lal/（LAL 日志分析脚本）
+      meter-analyzer-config/（Meter 指标配置）
+    oap-libs/（OAP 依赖库）
+    webapp/（UI 前端资源）
+    agents/（探针目录）
+      skywalking-agent.jar（Java Agent JAR）
+    licenses/（许可证文件）
 ```
 
 ### 3. 启动流程
@@ -214,23 +215,17 @@ INFO  - Agent registered successfully.
 
 2. 访问 SkyWalking UI（http://localhost:8080），查看「服务」列表：
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  SkyWalking UI - 仪表盘                                   │
-├─────────────────────────────────────────────────────────┤
-│  ┌─────────────────────────────────────────────────────┐│
-│  │  服务列表                      Apdex    Cpm    RT    ││
-│  │  ├─ your-service-name          1.00    12    5ms    ││
-│  │  └─ service-b                  0.98    8     3ms    ││
-│  │                                                     ││
-│  │  ┌─────────────────────────────────────────────────┐││
-│  │  │  服务拓扑图                                      │││
-│  │  │                                                 │││
-│  │  │  your-service-name ────→ service-b              │││
-│  │  │  (12 cpm, 5ms)        (8 cpm, 3ms)             │││
-│  │  └─────────────────────────────────────────────────┘││
-│  └─────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph ui["SkyWalking UI - 仪表盘"]
+        subgraph svc_list["服务列表（Apdex / Cpm / RT）"]
+            svc1["your-service-name<br/>Apdex 1.00 ｜ Cpm 12 ｜ RT 5ms"]
+            svc2["service-b<br/>Apdex 0.98 ｜ Cpm 8 ｜ RT 3ms"]
+        end
+        subgraph topo["服务拓扑图"]
+            t1["your-service-name<br/>（12 cpm, 5ms）"] --> t2["service-b<br/>（8 cpm, 3ms）"]
+        end
+    end
 ```
 
 #### 5.2 查看 Trace 详情
@@ -238,80 +233,83 @@ INFO  - Agent registered successfully.
 1. 点击「追踪」菜单，可以看到最近的 Trace 列表
 2. 点击一个 Trace，查看调用链详情：
 
+```mermaid
+graph TD
+    subgraph trace["Trace: e8a2f3b4c5d6e7f8a9b0c1d2e3f4a5b6.1.1690000000000<br/>总耗时: 15ms ｜ Span 数: 3 ｜ 状态: 成功"]
+        svcA["your-service-name [5ms]"] --> spanA["GET /hello [2ms]<br/>（Entry Span）"]
+        svcB["service-b [8ms]"] --> spanB1["GET /api [5ms]<br/>（Entry Span）"]
+        svcB --> spanB2["SELECT * FROM users [3ms]<br/>（Exit Span - MySQL）"]
+    end
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  Trace: e8a2f3b4c5d6e7f8a9b0c1d2e3f4a5b6.1.1690000000000     │
-│  总耗时: 15ms  |  Span 数: 3  |  状态: ✅ 成功                   │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  your-service-name [5ms]                                       │
-│    ├── GET /hello [2ms]  ← Entry Span                         │
-│    │                                                           │
-│  service-b [8ms]                                               │
-│    ├── GET /api [5ms]  ← Entry Span                            │
-│    └── SELECT * FROM users [3ms]  ← Exit Span (MySQL)         │
-│                                                                │
-│  时间线:                                                        │
-│  0ms  ├─── GET /hello 开始                                     │
-│  1ms  │    ├─── 调用 service-b                                 │
-│  5ms  │    │    ├─── SELECT users 开始                          │
-│  8ms  │    │    └─── SELECT users 结束 (3ms)                   │
-│  12ms │    └─── service-b 返回                                 │
-│  15ms └─── GET /hello 结束                                     │
-└────────────────────────────────────────────────────────────────┘
+
+时间线视图：
+
+```mermaid
+sequenceDiagram
+    participant U as 客户端
+    participant A as your-service-name
+    participant B as service-b
+    participant D as MySQL
+    U->>A: GET /hello 开始（0ms）
+    A->>B: 调用 service-b（1ms）
+    B->>D: SELECT users 开始（5ms）
+    D-->>B: SELECT users 结束（8ms，耗时 3ms）
+    B-->>A: service-b 返回（12ms）
+    A-->>U: GET /hello 结束（15ms）
 ```
 
 ### 6. 多服务调用链路示例
 
 #### 6.1 场景说明
 
-```
-用户请求 →  Gateway →  OrderService →  UserService →  MySQL
-                        ↓
-                   InventoryService →  Redis
+```mermaid
+graph LR
+    user["用户请求"] --> gateway["Gateway"] --> order["OrderService"] --> user_svc["UserService"] --> mysql["MySQL"]
+    order --> inv["InventoryService"] --> redis["Redis"]
 ```
 
 #### 6.2 在 SkyWalking UI 中看到的拓扑
 
-```
-                         ┌──────────────┐
-                         │   Gateway    │
-                         └──────┬───────┘
-                                │
-                         ┌──────▼───────┐
-                         │ OrderService │
-                         └──┬────────┬──┘
-                            │        │
-                 ┌──────────▼──┐  ┌──▼──────────────┐
-                 │ UserService │  │InventoryService  │
-                 └──────┬──────┘  └──────┬───────────┘
-                        │                │
-                 ┌──────▼──────┐  ┌──────▼──────┐
-                 │    MySQL    │  │    Redis    │
-                 └─────────────┘  └─────────────┘
+```mermaid
+graph TD
+    gateway["Gateway"] --> order["OrderService"]
+    order --> user_svc["UserService"]
+    order --> inv_svc["InventoryService"]
+    user_svc --> mysql["MySQL"]
+    inv_svc --> redis["Redis"]
 ```
 
 #### 6.3 对应的完整 Trace
 
-```
-Trace ID: abc123.1.1690000000000
+```mermaid
+graph TD
+    trace["Trace ID: abc123.1.1690000000000"]
 
-Segment-1 (Gateway, 10ms)
-  ├── Span-0 [Entry]  GET /api/order → 10ms
-  └── Span-1 [Exit]   POST /order → OrderService → 8ms
+    subgraph seg1["Segment-1（Gateway, 10ms）"]
+        s1_0["Span-0 [Entry]<br/>GET /api/order → 10ms"]
+        s1_1["Span-1 [Exit]<br/>POST /order → OrderService → 8ms"]
+    end
 
-Segment-2 (OrderService, 8ms)
-  ├── Span-0 [Entry]  POST /order → 8ms
-  ├── Span-1 [Exit]   GET /user/123 → UserService → 5ms
-  └── Span-2 [Exit]   GET /inventory/456 → InventoryService → 3ms
+    subgraph seg2["Segment-2（OrderService, 8ms）"]
+        s2_0["Span-0 [Entry]<br/>POST /order → 8ms"]
+        s2_1["Span-1 [Exit]<br/>GET /user/123 → UserService → 5ms"]
+        s2_2["Span-2 [Exit]<br/>GET /inventory/456 → InventoryService → 3ms"]
+    end
 
-Segment-3 (UserService, 5ms)
-  ├── Span-0 [Entry]  GET /user/123 → 5ms
-  └── Span-1 [Exit]   SELECT * FROM user WHERE id=? → MySQL → 3ms
+    subgraph seg3["Segment-3（UserService, 5ms）"]
+        s3_0["Span-0 [Entry]<br/>GET /user/123 → 5ms"]
+        s3_1["Span-1 [Exit]<br/>SELECT * FROM user WHERE id=? → MySQL → 3ms"]
+    end
 
-Segment-4 (InventoryService, 3ms)
-  ├── Span-0 [Entry]  GET /inventory/456 → 3ms
-  └── Span-1 [Exit]   GET inventory:456 → Redis → 1ms
+    subgraph seg4["Segment-4（InventoryService, 3ms）"]
+        s4_0["Span-0 [Entry]<br/>GET /inventory/456 → 3ms"]
+        s4_1["Span-1 [Exit]<br/>GET inventory:456 → Redis → 1ms"]
+    end
+
+    trace --> seg1
+    s1_1 -- "跨进程传播" --> s2_0
+    s2_1 -- "跨进程传播" --> s3_0
+    s2_2 -- "跨进程传播" --> s4_0
 ```
 
 ---

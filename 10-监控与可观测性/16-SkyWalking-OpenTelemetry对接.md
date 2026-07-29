@@ -6,90 +6,65 @@
 
 **OpenTelemetry（OTel）** 是 CNCF 孵化的**可观测性统一标准**，旨在提供一套与厂商无关的 API、SDK 和工具，用于生成、收集和导出遥测数据（Traces、Metrics、Logs）。
 
-```
 OpenTelemetry 的核心组件：
 
-┌──────────────────────────────────────────────────────────────────┐
-│  OpenTelemetry 架构                                               │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  API（接口定义）                                           │   │
-│  │  ├── Trace API：创建 Span，管理上下文传播                   │   │
-│  │  ├── Metrics API：创建 Counter/Gauge/Histogram             │   │
-│  │  └── Logs API：日志桥接                                  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  SDK（具体实现）                                           │   │
-│  │  ├── TracerProvider：Span 处理器 + 导出器                  │   │
-│  │  ├── MeterProvider：Metric Reader + 导出器                 │   │
-│  │  └── LoggerProvider：Log Record 处理器 + 导出器            │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Collector（收集器）                                        │   │
-│  │  ├── Receiver：接收 OTLP/Zipkin/Jaeger 数据                │   │
-│  │  ├── Processor：批处理/过滤/采样/转换                       │   │
-│  │  └── Exporter：导出到 SkyWalking/Jaeger/Prometheus/...     │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph api["API（接口定义）"]
+        trace_api["Trace API：创建 Span，管理上下文传播"]
+        metrics_api["Metrics API：创建 Counter/Gauge/Histogram"]
+        logs_api["Logs API：日志桥接"]
+    end
+
+    subgraph sdk["SDK（具体实现）"]
+        tracer["TracerProvider：Span 处理器 + 导出器"]
+        meter["MeterProvider：Metric Reader + 导出器"]
+        logger["LoggerProvider：Log Record 处理器 + 导出器"]
+    end
+
+    subgraph collector["Collector（收集器）"]
+        receiver["Receiver：接收 OTLP/Zipkin/Jaeger 数据"]
+        processor["Processor：批处理/过滤/采样/转换"]
+        exporter["Exporter：导出到 SkyWalking/Jaeger/Prometheus/..."]
+        receiver --> processor --> exporter
+    end
+
+    api --> sdk --> collector
 ```
 
 ### 2. SkyWalking 与 OTel 的关系
 
 SkyWalking v9+ **原生支持** OpenTelemetry 协议，主要体现在：
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  SkyWalking 与 OTel 的集成点                                     │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ① OTLP Receiver（OAP 内置）                                     │
-│     └── OAP 可以直接接收 OTel SDK 发送的 OTLP 数据               │
-│                                                                   │
-│  ② OTel Java Agent 兼容                                          │
-│     └── 使用 OTel Java Agent 的应用，数据可以发送到 SkyWalking    │
-│                                                                   │
-│  ③ SkyWalking Agent → OTel Collector                             │
-│     └── SkyWalking Agent 的数据可以转发到 OTel Collector          │
-│                                                                   │
-│  ④ Prometheus Fetcher                                            │
-│     └── OAP 可以通过 Prometheus 拉取 OTel SDK 的 Metrics          │
-│                                                                   │
-│  ⑤ W3C TraceContext 兼容                                         │
-│     └── SkyWalking 支持 W3C TraceContext 传播协议                 │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph integration["SkyWalking 与 OTel 的集成点"]
+        p1["① OTLP Receiver（OAP 内置）<br/>OAP 可以直接接收 OTel SDK 发送的 OTLP 数据"]
+        p2["② OTel Java Agent 兼容<br/>使用 OTel Java Agent 的应用，数据可以发送到 SkyWalking"]
+        p3["③ SkyWalking Agent → OTel Collector<br/>SkyWalking Agent 的数据可以转发到 OTel Collector"]
+        p4["④ Prometheus Fetcher<br/>OAP 可以通过 Prometheus 拉取 OTel SDK 的 Metrics"]
+        p5["⑤ W3C TraceContext 兼容<br/>SkyWalking 支持 W3C TraceContext 传播协议"]
+        p1 --> p2 --> p3 --> p4 --> p5
+    end
 ```
 
 ### 3. 三种混合架构方案
 
 #### 3.1 方案 A：SkyWalking Agent + OAP + OTel Backend
 
-```
-┌──────────────────┐
-│ SkyWalking Agent │──→ SkyWalking OAP (Trace/Logs)
-│  (Java 应用)      │
-└──────────────────┘
-         │
-         │ OTLP Exporter
-         ▼
-┌──────────────────┐
-│ OTel Collector   │──→ OTel Backend (Jaeger/Prometheus)
-└──────────────────┘
+```mermaid
+graph LR
+    agent["SkyWalking Agent<br/>（Java 应用）"] --> oap["SkyWalking OAP<br/>（Trace/Logs）"]
+    agent -- "OTLP Exporter" --> collector["OTel Collector"] --> backend["OTel Backend<br/>（Jaeger/Prometheus）"]
 ```
 
 **适用场景**：已有 SkyWalking 部署，想逐步引入 OTel 生态。
 
 #### 3.2 方案 B：OTel SDK + OAP
 
-```
-┌──────────────────┐
-│  OTel Java Agent │──→ OTLP ──→ SkyWalking OAP
-│  (Java 应用)      │              (OTLP Receiver)
-└──────────────────┘
+```mermaid
+graph LR
+    agent["OTel Java Agent<br/>（Java 应用）"] -- "OTLP" --> oap["SkyWalking OAP<br/>（OTLP Receiver）"]
 ```
 
 **适用场景**：已经使用 OTel SDK 的应用，想利用 SkyWalking 的分析和 UI 能力。
@@ -105,18 +80,12 @@ SkyWalking v9+ **原生支持** OpenTelemetry 协议，主要体现在：
 
 #### 3.3 方案 C：全链路 OTel
 
-```
-┌──────────────────┐     OTLP      ┌──────────────┐
-│  OTel Agent/SDK  │──────────────→│ OTel Collector│
-└──────────────────┘               └───────┬──────┘
-                                           │
-                    ┌──────────────────────┼──────────────────────┐
-                    │                      │                      │
-                    ▼                      ▼                      ▼
-            ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-            │  SkyWalking  │     │   Jaeger     │     │  Prometheus  │
-            │  (OTLP Rcvr) │     │  (OTLP Rcvr) │     │  (OTLP Rcvr) │
-            └──────────────┘     └──────────────┘     └──────────────┘
+```mermaid
+graph LR
+    agent["OTel Agent/SDK"] -- "OTLP" --> collector["OTel Collector"]
+    collector --> sw["SkyWalking<br/>（OTLP Receiver）"]
+    collector --> jaeger["Jaeger<br/>（OTLP Receiver）"]
+    collector --> prom["Prometheus<br/>（OTLP Receiver）"]
 ```
 
 **适用场景**：标准化可观测性平台，所有数据走 OTLP 协议。
@@ -159,26 +128,14 @@ receiver-otel:
 
 **层面 1：跨服务传播时（Header 转换）**
 
+```mermaid
+graph TB
+    svc_a["Service A（SW Agent）发起 HTTP 调用：<br/>Header: sw8 = 1-4bf92f3577b34da6a3ce929d0e0e4736.1.1690000000000-3..."]
+    svc_a -- "网关/代理层做协议转换（或者 OTel Agent 自动识别 sw8）" --> svc_b["Service B（OTel Agent）接收：<br/>Header: traceparent = 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"]
+    svc_b --> formula["转换公式：<br/>W3C traceId = sw8 traceId 中第一个「-」之前的部分（去掉 .threadId.timestamp）<br/>W3C parentId = sw8 segmentId（UUID，取前 16 字节）<br/>W3C trace-flags = sw8 sample 标志（0 或 1）"]
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  场景：SkyWalking 服务 A 调用 OTel 服务 B（sw8 → W3C）             │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  Service A（SW Agent）发起 HTTP 调用：                              │
-│    Header: sw8 = "1-4bf92f3577b34da6a3ce929d0e0e4736.1.1690000000000-3..."
-│                                                                   │
-│  ↓ 网关/代理层做协议转换（或者 OTel Agent 自动识别 sw8）            │
-│                                                                   │
-│  Service B（OTel Agent）接收：                                      │
-│    Header: traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-│                                                                   │
-│  转换公式：                                                        │
-│    W3C traceId = sw8 traceId 中第一个 "-" 之前的部分（去掉 .threadId.timestamp）│
-│    W3C parentId = sw8 segmentId（UUID，取前 16 字节）              │
-│    W3C trace-flags = sw8 sample 标志（0 或 1）                     │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
-```
+
+场景：SkyWalking 服务 A 调用 OTel 服务 B（sw8 → W3C）
 
 反向转换（W3C → sw8）同理：
 
@@ -226,17 +183,15 @@ public SegmentObject convert(InstrumentationLibrarySpans otelSpans) {
 
 **为什么不重新生成 TraceId？**
 
+```mermaid
+graph TB
+    a["Service A（SW Agent）<br/>traceId = abc.1.1690000000000"]
+    a -- "调用" --> b["Service B（OTel Agent）<br/>traceId = 4bf92f3577b34da6a3ce929d0e0e4736"]
+    b -- "OAP 重新生成" --> stored["OAP 存储的 traceId = xyz.2.1690000000001"]
+    stored --> broken["结果：两个 Segment 的 traceId 不一样<br/>→ 无法组装成一条完整的 Trace → 断链！"]
 ```
+
 如果 OAP 重新生成 TraceId，会发生什么？
-
-  Service A（SW Agent）: traceId = abc.1.1690000000000
-        ↓ 调用
-  Service B（OTel Agent）: traceId = 4bf92f3577b34da6a3ce929d0e0e4736
-        ↓ OAP 重新生成
-  OAP 存储的 traceId = xyz.2.1690000000001
-
-结果：两个 Segment 的 traceId 不一样 → 无法组装成一条完整的 Trace → 断链！
-```
 
 **核心原则**：**TraceId 必须是跨服务传播的，不是 OAP 生成的。** 传播协议（sw8 或 W3C）负责把 TraceId 从上游带到下游，OAP 只负责存储，不负责生成。
 
@@ -250,37 +205,40 @@ public SegmentObject convert(InstrumentationLibrarySpans otelSpans) {
 
 **混合模式的最佳实践**：
 
-```
 最佳方案：在网关层统一转换（推荐用 OTel Collector）
 
-  入口流量（W3C 协议）
-       │
-       ▼
-  OTel Collector / API Gateway
-       │
-       ├──→ sw8 协议 → SkyWalking Agent 服务
-       └──→ W3C 协议 → OTel Agent 服务
+```mermaid
+graph TB
+    ingress["入口流量（W3C 协议）"] --> gw["OTel Collector / API Gateway"]
+    gw -- "sw8 协议" --> sw_svc["SkyWalking Agent 服务"]
+    gw -- "W3C 协议" --> otel_svc["OTel Agent 服务"]
+```
 
 这样整条链路的 TraceId 完全一致，不会出现断链。
-```
 
 ### 6. 迁移策略
 
-```
-阶段 1（当前）：纯 SkyWalking 生态
-  ├── Java Agent 使用 sw8 协议
-  └── OAP 接收 sw8 协议数据
+```mermaid
+graph TB
+    subgraph phase1["阶段 1（当前）：纯 SkyWalking 生态"]
+        p1a["Java Agent 使用 sw8 协议"]
+        p1b["OAP 接收 sw8 协议数据"]
+    end
 
-阶段 2（过渡）：SkyWalking + OTel 混合
-  ├── 部分服务使用 SkyWalking Agent（sw8）
-  ├── 部分服务使用 OTel Agent（OTLP）
-  ├── OAP 同时接收 sw8 和 OTLP 数据
-  └── 两种协议在 OAP 中统一处理
+    subgraph phase2["阶段 2（过渡）：SkyWalking + OTel 混合"]
+        p2a["部分服务使用 SkyWalking Agent（sw8）"]
+        p2b["部分服务使用 OTel Agent（OTLP）"]
+        p2c["OAP 同时接收 sw8 和 OTLP 数据"]
+        p2d["两种协议在 OAP 中统一处理"]
+    end
 
-阶段 3（目标）：全链路 OTel
-  ├── 所有服务使用 OTel Agent/SDK
-  ├── OTel Collector 统一接收和处理
-  └── SkyWalking 作为 OTel 的后端分析平台
+    subgraph phase3["阶段 3（目标）：全链路 OTel"]
+        p3a["所有服务使用 OTel Agent/SDK"]
+        p3b["OTel Collector 统一接收和处理"]
+        p3c["SkyWalking 作为 OTel 的后端分析平台"]
+    end
+
+    phase1 --> phase2 --> phase3
 ```
 
 ### 7. SkyWalking 与 Prometheus 集成

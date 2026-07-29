@@ -71,24 +71,20 @@ Agent 每 20 秒通过 gRPC `fetchConfigurations` 主动向 OAP 拉取，OAP 背
 | **service 级** | `service` 名 | Agent 在 `ConfigurationSyncRequest` 里带 `Config.Agent.SERVICE_NAME`，OAP 按此查表返回对应 KV |
 | **instance 级** | 同 service 共享 | 同 service 的所有实例**共享同一份配置**，无法给单个实例单独配 |
 
-```
-order-service 的 3 个实例（Pod1/Pod2/Pod3）
-        ↓ 全部收到同一份 trace.sample_rate: 1000
-   每个实例各自用 AtomicInteger 按 1000/3s 独立限流
-        ↓
-   合计可能 3000 个/3s（下发的是"每实例配额"，非"全服务总量"）
+```mermaid
+graph TB
+    instances["order-service 的 3 个实例（Pod1/Pod2/Pod3）"]
+    instances -- "全部收到同一份 trace.sample_rate: 1000" --> quota["每个实例各自用 AtomicInteger 按 1000/3s 独立限流"]
+    quota --> total["合计可能 3000 个/3s<br/>（下发的是「每实例配额」，非「全服务总量」）"]
 ```
 
 **跨进程采样一致性**：分布式调用时，上游若已采样，下游必须延续，否则链路断裂：
 
-```
-order-service(已采样) ──RPC──> payment-service(本该被丢弃)
-                                        ↓
-                  ContextCarrier 携带采样标记
-                                        ↓
-            payment-service 收到 carrier，调用 SamplingService.forceSampled()
-                                        ↓
-                  强制延续采样，链路完整（forceSampled 唯一用途）
+```mermaid
+flowchart TD
+    A["order-service（已采样）"] -- RPC --> B["payment-service（本该被丢弃）"]
+    B -->|"ContextCarrier 携带采样标记"| C["payment-service 收到 carrier<br/>调用 SamplingService.forceSampled()"]
+    C --> D["强制延续采样，链路完整<br/>（forceSampled 唯一用途）"]
 ```
 
 **③ OAP 端：后置采样策略**
@@ -122,17 +118,29 @@ agent-analyzer:
 
 为什么 SkyWalking 要有 Agent 前置 + OAP 后置**两套**采样？根本原因在于**信息可获得性的时序差**：
 
-```
-请求生命周期：
-请求开始 ────────────────────────────────────────> 请求结束
-   │                                                  │
-   ▼                                                  ▼
-Agent 决策点                                    OAP 决策点
-此时：                                          此时：
-· 不知道会不会出错                              · 已知 isError
-· 不知道耗时多久                                · 已知 duration
-· 只能做"无脑"计数/比例丢弃                     · 可基于 error/slow 智能保留
-· 省：网络带宽 + OAP 处理压力                   · 省：存储空间
+```mermaid
+graph TD
+    subgraph lifecycle["请求生命周期"]
+        direction LR
+        start["请求开始"] --> end_node["请求结束"]
+    end
+
+    subgraph agent_side["Agent 决策点（请求开始时）"]
+        a1["不知道会不会出错"]
+        a2["不知道耗时多久"]
+        a3["只能做无脑计数/比例丢弃"]
+        a4["省：网络带宽 + OAP 处理压力"]
+    end
+
+    subgraph oap_side["OAP 决策点（请求结束后）"]
+        o1["已知 isError"]
+        o2["已知 duration"]
+        o3["可基于 error/slow 智能保留"]
+        o4["省：存储空间"]
+    end
+
+    start --> agent_side
+    end_node --> oap_side
 ```
 
 - **Agent 前置采样**省的是**带宽**（数据根本没发出去），但只能用固定比例/计数
@@ -144,32 +152,28 @@ Agent 决策点                                    OAP 决策点
 
 完整的"配置中心 -> OAP -> Agent"下发链路：
 
-```
-┌─────────────┐         ┌──────────────────────────────────────┐    ┌──────────────┐
-│ Nacos/Apollo│         │            OAP 端                      │    │    Agent      │
-│ /ZK/etcd    │         │                                       │    │              │
-│             │  ①注册  │  AgentConfigurationsWatcher           │    │              │
-│ dataId:     │<────────│  (item: configuration-discovery        │    │              │
-│ configurat- │  监听    │   .default.agentConfigurations)       │    │              │
-│ ion-discov- │  变更   │            ▲                          │    │              │
-│ ery.default │────────>│            │ ②整段YAML解析成KV         │    │              │
-│ .agentConf │         │            ▼                          │    │              │
-│             │         │  ConfigurationDiscoveryServiceHandler │    │              │
-└─────────────┘         │  gRPC: fetchConfigurations()         │    │              │
-                        │            ▲                          │    │              │
-                        │            │ ③Agent每20s主动pull       │    │              │
-                        └────────────┼──────────────────────────┘    │              │
-                                     │                                │              │
-                                     └───────────────────────────────>│              │
-                                      ④返回 Commands(KV list)          │              │
-                                                                      │  CommandService│
-                                                                      │  解析          │
-                                                                      │      ▼         │
-                                                                      │  SamplingRate  │
-                                                                      │  Watcher       │
-                                                                      │      ▼         │
-                                                                      │  实时切换采样率 │
-                                                                      └──────────────┘
+```mermaid
+graph LR
+    subgraph config_center["配置中心（Nacos/Apollo/ZK/etcd）"]
+        config_data["dataId:<br/>configuration-discovery<br/>.default.agentConfigurations"]
+    end
+
+    subgraph oap_side["OAP 端"]
+        watcher["AgentConfigurationsWatcher<br/>（监听配置变更）"]
+        handler["ConfigurationDiscoveryServiceHandler<br/>（gRPC: fetchConfigurations()）"]
+        watcher -->|"②整段YAML解析成KV"| handler
+    end
+
+    subgraph agent_side["Agent 端"]
+        cmd_service["CommandService（解析 KV）"]
+        sw_watcher["SamplingRateWatcher"]
+        result["实时切换采样率"]
+        cmd_service --> sw_watcher --> result
+    end
+
+    config_data -- "①注册监听 / 变更通知" --> watcher
+    handler -- "③Agent 每 20s 主动 pull" --> agent_side
+    agent_side -- "④返回 Commands（KV list）" --> handler
 ```
 
 关键澄清：
@@ -206,26 +210,23 @@ Agent 决策点                                    OAP 决策点
 
 SkyWalking Profiling 通过 **On-CPU 线程栈采样** 生成火焰图：
 
-```
-Profiling 流程：
-
-1. OAP 下发 Profiling 任务
-   ├── 目标服务：order-service
-   ├── 持续时间：5 分钟
-   ├── 采样间隔：10ms
-   └── 监控类型：On-CPU
-
-2. Agent 执行 Profiling
-   ├── 每 10ms 采样一次目标线程的调用栈
-   ├── 聚合相同调用栈的计数
-   └── 5 分钟后上报结果
-
-3. OAP 聚合和存储
-   ├── 合并多个 Agent 的采样数据
-   └── 生成火焰图
-
-4. UI 展示
-   └── 火焰图 + 热点分析
+```mermaid
+graph TD
+    root["Profiling 流程"]
+    root --> step1["1. OAP 下发 Profiling 任务"]
+    step1 --> s1a["目标服务：order-service"]
+    step1 --> s1b["持续时间：5 分钟"]
+    step1 --> s1c["采样间隔：10ms"]
+    step1 --> s1d["监控类型：On-CPU"]
+    root --> step2["2. Agent 执行 Profiling"]
+    step2 --> s2a["每 10ms 采样一次目标线程的调用栈"]
+    step2 --> s2b["聚合相同调用栈的计数"]
+    step2 --> s2c["5 分钟后上报结果"]
+    root --> step3["3. OAP 聚合和存储"]
+    step3 --> s3a["合并多个 Agent 的采样数据"]
+    step3 --> s3b["生成火焰图"]
+    root --> step4["4. UI 展示"]
+    step4 --> s4a["火焰图 + 热点分析"]
 ```
 
 #### 2.2 与 JProfiler/Arthas 的对比
@@ -246,34 +247,36 @@ eBPF（extended Berkeley Packet Filter）是 Linux 内核的一项技术，允�
 
 #### 3.2 Rover 的监控能力
 
-```
-Rover 监控能力：
+```mermaid
+graph TD
+    subgraph rover["Rover（eBPF 探针）"]
+        direction TB
 
-┌──────────────────────────────────────────────────────────────┐
-│  Rover（eBPF 探针）                                          │
-│                                                              │
-│  ├── 网络监控                                                │
-│  │   ├── TCP 连接追踪（建立/关闭/重传）                       │
-│  │   ├── HTTP/gRPC 协议分析                                  │
-│  │   ├── 网络延迟和吞吐量                                    │
-│  │   └── TLS 握手耗时                                        │
-│  │                                                           │
-│  ├── 进程监控                                                │
-│  │   ├── CPU 使用率（按进程/线程）                            │
-│  │   ├── 内存使用（RSS/VSS）                                 │
-│  │   └── 磁盘 I/O 和文件操作                                 │
-│  │                                                           │
-│  ├── 系统监控                                                │
-│  │   ├── 系统调用追踪                                        │
-│  │   ├── DNS 查询监控                                        │
-│  │   └── 文件系统事件                                        │
-│  │                                                           │
-│  └── 特点                                                    │
-│      ├── 零侵入：无需修改应用代码                             │
-│      ├── 零 Agent：无需安装任何 Agent                         │
-│      └── 内核级精度：数据直接从内核获取                       │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+        subgraph network["网络监控"]
+            n1["TCP 连接追踪（建立/关闭/重传）"]
+            n2["HTTP/gRPC 协议分析"]
+            n3["网络延迟和吞吐量"]
+            n4["TLS 握手耗时"]
+        end
+
+        subgraph process["进程监控"]
+            p1["CPU 使用率（按进程/线程）"]
+            p2["内存使用（RSS/VSS）"]
+            p3["磁盘 I/O 和文件操作"]
+        end
+
+        subgraph system["系统监控"]
+            s1["系统调用追踪"]
+            s2["DNS 查询监控"]
+            s3["文件系统事件"]
+        end
+
+        subgraph features["特点"]
+            f1["零侵入：无需修改应用代码"]
+            f2["零 Agent：无需安装任何 Agent"]
+            f3["内核级精度：数据直接从内核获取"]
+        end
+    end
 ```
 
 ### 4. 事件系统（Event）
@@ -282,13 +285,14 @@ Rover 监控能力：
 
 SkyWalking Event 是**离散的事件通知**，用于标记系统中发生的重要事件：
 
-```
-Event 类型：
-├── 部署事件：应用发布/回滚
-├── 配置变更事件：配置中心更新
-├── 扩缩容事件：K8s Pod 创建/销毁
-├── 故障事件：节点宕机/网络中断
-└── 自定义事件：业务事件（如大促开始）
+```mermaid
+graph TD
+    root["Event 类型"]
+    root --> e1["部署事件：应用发布/回滚"]
+    root --> e2["配置变更事件：配置中心更新"]
+    root --> e3["扩缩容事件：K8s Pod 创建/销毁"]
+    root --> e4["故障事件：节点宕机/网络中断"]
+    root --> e5["自定义事件：业务事件（如大促开始）"]
 ```
 
 #### 4.2 Event 的使用

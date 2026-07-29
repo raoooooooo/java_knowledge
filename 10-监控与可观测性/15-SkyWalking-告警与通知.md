@@ -4,37 +4,15 @@
 
 ### 1. 告警架构全景
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                    告警引擎架构                                    │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  OAP 告警模块 (server-alarm-plugin)                        │   │
-│  │                                                           │   │
-│  │  ① 告警规则定义 (alarm-settings.yml)                       │   │
-│  │     ├── 规则名称 + 指标名称 + 阈值 + 周期 + 静默期          │   │
-│  │     └── 支持动态配置中心（Apollo/Nacos/ZK）热更新            │   │
-│  │                                                           │   │
-│  │  ② 告警规则引擎 (AlarmRulesEngine)                         │   │
-│  │     ├── 定时检查（每 1 分钟）                               │   │
-│  │     ├── 指标查询 → 阈值判定 → 触发告警                       │   │
-│  │     └── 告警生命周期管理（触发 → 持续 → 恢复）              │   │
-│  │                                                           │   │
-│  │  ③ 告警钩子 (AlarmHook)                                    │   │
-│  │     ├── Webhook（HTTP POST JSON）                          │   │
-│  │     ├── gRPC Hook（自定义 gRPC 服务）                       │   │
-│  │     └── Prometheus AlertManager（转接）                     │   │
-│  │                                                           │   │
-│  │  ④ 通知渠道（通过 Webhook 实现）                           │   │
-│  │     ├── 钉钉机器人                                           │   │
-│  │     ├── 企业微信机器人                                       │   │
-│  │     ├── 飞书机器人                                           │   │
-│  │     ├── Slack                                              │   │
-│  │     └── 邮件（通过外部服务）                                  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph alarm_module["OAP 告警模块（server-alarm-plugin）"]
+        rules["① 告警规则定义（alarm-settings.yml）<br/>规则名称 + 指标名称 + 阈值 + 周期 + 静默期<br/>支持动态配置中心（Apollo/Nacos/ZK）热更新"]
+        engine["② 告警规则引擎（AlarmRulesEngine）<br/>定时检查（每 1 分钟）<br/>指标查询 → 阈值判定 → 触发告警<br/>告警生命周期管理（触发 → 持续 → 恢复）"]
+        hook["③ 告警钩子（AlarmHook）<br/>Webhook（HTTP POST JSON）<br/>gRPC Hook（自定义 gRPC 服务）<br/>Prometheus AlertManager（转接）"]
+        channel["④ 通知渠道（通过 Webhook 实现）<br/>钉钉机器人 ｜ 企业微信机器人 ｜ 飞书机器人 ｜ Slack ｜ 邮件（通过外部服务）"]
+        rules --> engine --> hook --> channel
+    end
 ```
 
 ### 2. 告警规则配置（alarm-settings.yml）
@@ -112,27 +90,14 @@ grpchook:
 
 ### 3. 告警生命周期
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                    告警生命周期                                     │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│   [正常] ────── 指标超过阈值 ──────→ [触发]                        │
-│     ↑                                  │                          │
-│     │                                  │ 发送告警通知               │
-│     │                                  ▼                          │
-│     │                              [持续中]                        │
-│     │                                  │                          │
-│     │                                  │ 指标回到正常               │
-│     │                                  ▼                          │
-│     └────────── 发送恢复通知 ─────── [恢复]                         │
-│                                         │                         │
-│                                    静默期 N 分钟                    │
-│                                         │                         │
-│                                         ▼                         │
-│                                     [正常]                         │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    正常 --> 触发: 指标超过阈值
+    触发 --> 持续中: 发送告警通知
+    持续中 --> 恢复: 指标回到正常
+    恢复 --> 正常: 发送恢复通知
+    恢复 --> 静默中: 静默期 N 分钟
+    静默中 --> 正常
 ```
 
 **关键参数说明**：
@@ -224,17 +189,17 @@ configuration:
 
 ### 6. 告警与 Prometheus AlertManager 集成
 
-```
 SkyWalking 告警 → Prometheus AlertManager
 
-1. OAP 检测到告警
-2. 通过 Webhook 发送到 AlertManager
-3. AlertManager 处理告警（分组、抑制、静默）
-4. AlertManager 发送通知到各种渠道
-   ├── Email
-   ├── PagerDuty
-   ├── Slack
-   └── Webhook（自定义）
+```mermaid
+graph TD
+    detect["1. OAP 检测到告警"] --> webhook["2. 通过 Webhook 发送到 AlertManager"]
+    webhook --> process["3. AlertManager 处理告警（分组、抑制、静默）"]
+    process --> notify["4. AlertManager 发送通知到各种渠道"]
+    notify --> email["Email"]
+    notify --> pagerduty["PagerDuty"]
+    notify --> slack["Slack"]
+    notify --> custom["Webhook（自定义）"]
 ```
 
 ---

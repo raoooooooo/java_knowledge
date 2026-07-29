@@ -10,23 +10,24 @@
 
 > ⚠️ **资料勘误**：常见说法称"MAL 专注分析从外部系统接入的 Meter 数据"，这是不准确的。MAL 处理的是所有 Meter 格式的指标，来源既包括**外部采集器**（Prometheus/OTel/Telegraf/Zabbix），也包括 **SkyWalking Agent 自身的 meter 插件**（micrometer/spring-sleuth）。本文 1.2 的 `spring-sleuth.yaml` 示例正是 Agent 内部上报的 JVM 指标，并非外部系统。OAL 与 MAL 的真正分界线是**数据范式**——OAL 处理离散的 Source 实体，MAL 处理时间序列指标流，而非"内部 vs 外部"。详见文末「资料勘误与重点提醒」。
 
-```
 OAL vs MAL 对比：
 
-┌──────────────────────────────────────────────────────────────┐
-│  OAL（Observability Analysis Language）                       │
-│  ├── 分析对象：Source 离散实体（Service/Endpoint/Relation）  │
-│  ├── 数据来源：Trace Segment（Agent）+ Envoy ALS（Mesh 无 Trace）│
-│  ├── 风格：声明式 from(Source.*).sum(...)                    │
-│  ├── 输出：标准化的 APM 指标                                   │
-│  └── 示例：service_cpm = from(Service.*).sum(1)              │
-│                                                              │
-│  MAL（Meter Analysis Language）                               │
-│  ├── 分析对象：Meter 时间序列流（Counter/Gauge/Histogram）   │
-│  ├── 数据来源：Agent meter 插件 + 外部采集器（Prometheus/OTel/Telegraf/Zabbix）│
-│  ├── 风格：表达式式（类 PromQL，exp 字段）                   │
-│  └── 输出：标准化的 SkyWalking Meter 指标                      │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph oal["OAL（Observability Analysis Language）"]
+        o1["分析对象：Source 离散实体（Service/Endpoint/Relation）"]
+        o2["数据来源：Trace Segment（Agent）+ Envoy ALS（Mesh 无 Trace）"]
+        o3["风格：声明式 from(Source.*).sum(...)"]
+        o4["输出：标准化的 APM 指标"]
+        o5["示例：service_cpm = from(Service.*).sum(1)"]
+    end
+
+    subgraph mal["MAL（Meter Analysis Language）"]
+        m1["分析对象：Meter 时间序列流（Counter/Gauge/Histogram）"]
+        m2["数据来源：Agent meter 插件 + 外部采集器（Prometheus/OTel/Telegraf/Zabbix）"]
+        m3["风格：表达式式（类 PromQL，exp 字段）"]
+        m4["输出：标准化的 SkyWalking Meter 指标"]
+    end
 ```
 
 #### 1.2 MAL 配置示例
@@ -60,21 +61,22 @@ metricsRules:
 
 #### 1.3 MAL 处理流程
 
-```
-Meter 数据进入 OAP
-  │
-  ├── 1. MeterReceiver 接收原始 Meter 数据
-  │     ├── Counter（累加值）
-  │     ├── Gauge（瞬时值）
-  │     └── Histogram（分布值）
-  │
-  ├── 2. MeterProcessor 根据 MAL 规则处理
-  │     ├── 分组（group）：按标签维度分组
-  │     ├── 过滤（filter）：过滤不符合条件的数据
-  │     └── 聚合（aggregation）：sum/avg/max/min/p99
-  │
-  └── 3. 输出标准化 Meter 指标
-        └── 写入存储（BanyanDB/ES/MySQL）
+```mermaid
+graph TD
+    meter_in["Meter 数据进入 OAP"]
+
+    meter_in --> recv["1. MeterReceiver 接收原始 Meter 数据"]
+    recv --> r1["Counter（累加值）"]
+    recv --> r2["Gauge（瞬时值）"]
+    recv --> r3["Histogram（分布值）"]
+
+    meter_in --> proc["2. MeterProcessor 根据 MAL 规则处理"]
+    proc --> p1["分组（group）：按标签维度分组"]
+    proc --> p2["过滤（filter）：过滤不符合条件的数据"]
+    proc --> p3["聚合（aggregation）：sum/avg/max/min/p99"]
+
+    meter_in --> out["3. 输出标准化 Meter 指标"]
+    out --> storage["写入存储（BanyanDB/ES/MySQL）"]
 ```
 
 ### 2. LAL（Log Analysis Language）
@@ -83,18 +85,17 @@ Meter 数据进入 OAP
 
 **LAL（Log Analysis Language）** 是 SkyWalking 用于**分析日志**的 DSL。它可以从原始日志中提取结构化信息，并与 Trace 关联。
 
-```
 LAL 的作用：
-原始日志（非结构化）→ LAL 解析 → 结构化日志 + 指标提取
 
-示例：
-原始日志: "2024-07-17 10:00:00 [ERROR] UserService: User not found: id=123"
-LAL 解析后:
-  ├── timestamp: 2024-07-17 10:00:00
-  ├── level: ERROR
-  ├── service: UserService
-  ├── message: User not found: id=123
-  └── 提取指标: error_count += 1
+```mermaid
+graph LR
+    raw["原始日志（非结构化）<br/>2024-07-17 10:00:00 [ERROR] UserService: User not found: id=123"]
+    raw -- "LAL 解析" --> parsed["结构化日志"]
+    parsed --> ts["timestamp: 2024-07-17 10:00:00"]
+    parsed --> level["level: ERROR"]
+    parsed --> svc["service: UserService"]
+    parsed --> msg["message: User not found: id=123"]
+    raw -- "LAL 解析" --> metric["提取指标: error_count += 1"]
 ```
 
 #### 2.2 LAL 脚本示例
@@ -212,20 +213,23 @@ service_cpm{service='order-service'}.compare(service_cpm{service='user-service'}
 
 #### 4.2 MQE 语法
 
-```
-基本语法：<metric_name>{<label_selector>}.<function>(<args>)
+基本语法：`<metric_name>{<label_selector>}.<function>(<args>)`
 
 支持的函数：
-├── avg(duration)     → 平均值
-├── sum(duration)     → 求和
-├── max(duration)     → 最大值
-├── min(duration)     → 最小值
-├── p99(duration)     → 99 百分位
-├── top(n, order)     → Top N
-├── bottom(n, order)  → Bottom N
-├── rate(duration)    → 速率
-├── increase(duration)→ 增量
-└── compare(metric)   → 对比
+
+```mermaid
+graph TD
+    mqe["MQE 函数"]
+    mqe --> f1["avg(duration) → 平均值"]
+    mqe --> f2["sum(duration) → 求和"]
+    mqe --> f3["max(duration) → 最大值"]
+    mqe --> f4["min(duration) → 最小值"]
+    mqe --> f5["p99(duration) → 99 百分位"]
+    mqe --> f6["top(n, order) → Top N"]
+    mqe --> f7["bottom(n, order) → Bottom N"]
+    mqe --> f8["rate(duration) → 速率"]
+    mqe --> f9["increase(duration) → 增量"]
+    mqe --> f10["compare(metric) → 对比"]
 ```
 
 ---

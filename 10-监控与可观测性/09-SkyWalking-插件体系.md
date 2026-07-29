@@ -6,55 +6,34 @@
 
 SkyWalking Java Agent 的插件体系覆盖了 Java 生态中几乎所有主流框架和中间件：
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│              SkyWalking Java Agent 插件体系全景                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  HTTP 服务端                                              │  │
-│  │  Tomcat 7/8/9/10 | Jetty | Undertow | SpringMVC         │  │
-│  │  Spring WebFlux | Struts2 | Play | RESTEasy             │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  HTTP 客户端                                              │  │
-│  │  HttpClient 3/4/5 | OkHttp | Spring RestTemplate         │  │
-│  │  WebClient | Feign | HttpURLConnection                   │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  RPC 框架                                                 │  │
-│  │  Dubbo 2/3 | gRPC | Motan | SofaRPC | Armeria           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  数据库                                                   │  │
-│  │  MySQL | PostgreSQL | Oracle | H2 | MongoDB              │  │
-│  │  ShardingSphere | MyBatis | Hibernate                    │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  缓存                                                     │  │
-│  │  Redis(Jedis/Lettuce/Redisson) | Memcached               │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  消息队列                                                   │  │
-│  │  Kafka | RocketMQ | RabbitMQ | ActiveMQ | Pulsar         │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  网关与微服务                                               │  │
-│  │  Spring Cloud Gateway | Resilience4j | Sentinel          │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  其他                                                     │  │
-│  │  Quartz | ElasticJob | XXL-Job | ThreadPool | Logback    │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph overview["SkyWalking Java Agent 插件体系全景"]
+        subgraph http_server["HTTP 服务端"]
+            hs["Tomcat 7/8/9/10 ｜ Jetty ｜ Undertow ｜ SpringMVC<br/>Spring WebFlux ｜ Struts2 ｜ Play ｜ RESTEasy"]
+        end
+        subgraph http_client["HTTP 客户端"]
+            hc["HttpClient 3/4/5 ｜ OkHttp ｜ Spring RestTemplate<br/>WebClient ｜ Feign ｜ HttpURLConnection"]
+        end
+        subgraph rpc["RPC 框架"]
+            r["Dubbo 2/3 ｜ gRPC ｜ Motan ｜ SofaRPC ｜ Armeria"]
+        end
+        subgraph database["数据库"]
+            db["MySQL ｜ PostgreSQL ｜ Oracle ｜ H2 ｜ MongoDB<br/>ShardingSphere ｜ MyBatis ｜ Hibernate"]
+        end
+        subgraph cache["缓存"]
+            ca["Redis（Jedis / Lettuce / Redisson）｜ Memcached"]
+        end
+        subgraph mq["消息队列"]
+            m["Kafka ｜ RocketMQ ｜ RabbitMQ ｜ ActiveMQ ｜ Pulsar"]
+        end
+        subgraph gateway["网关与微服务"]
+            gw["Spring Cloud Gateway ｜ Resilience4j ｜ Sentinel"]
+        end
+        subgraph others["其他"]
+            ot["Quartz ｜ ElasticJob ｜ XXL-Job ｜ ThreadPool ｜ Logback"]
+        end
+    end
 ```
 
 ### 2. 插件分类
@@ -91,28 +70,15 @@ SkyWalking Java Agent 的插件体系覆盖了 Java 生态中几乎所有主流�
 
 每个插件必须定义以下四个关键要素：
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                  插件增强四要素                               │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  1. witnessClasses（见证类）                                  │
-│     └── 验证目标框架/库是否真的存在                            │
-│     └── 如果没有，跳过增强（避免 ClassNotFoundException）      │
-│                                                              │
-│  2. classNameMatch（类匹配）                                  │
-│     └── 指定需要增强的目标类                                   │
-│     └── 支持：按名称 / 按注解 / 按父类 / 按接口               │
-│                                                              │
-│  3. methodsInterceptor（方法拦截器）                           │
-│     └── 指定需要拦截的方法                                     │
-│     └── 指定拦截逻辑的实现类                                   │
-│                                                              │
-│  4. 上下文传播（ContextCarrier / ContextSnapshot）             │
-│     └── 跨进程：注入/提取 ContextCarrier                       │
-│     └── 跨线程：捕获/恢复 ContextSnapshot                      │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph four["插件增强四要素"]
+        e1["1. witnessClasses（见证类）<br/>验证目标框架/库是否真的存在<br/>如果没有，跳过增强（避免 ClassNotFoundException）"]
+        e2["2. classNameMatch（类匹配）<br/>指定需要增强的目标类<br/>支持：按名称 / 按注解 / 按父类 / 按接口"]
+        e3["3. methodsInterceptor（方法拦截器）<br/>指定需要拦截的方法<br/>指定拦截逻辑的实现类"]
+        e4["4. 上下文传播（ContextCarrier / ContextSnapshot）<br/>跨进程：注入/提取 ContextCarrier<br/>跨线程：捕获/恢复 ContextSnapshot"]
+        e1 --> e2 --> e3 --> e4
+    end
 ```
 
 ### 4. 插件发现与加载机制
@@ -130,22 +96,20 @@ org.apache.skywalking.apm.plugin.spring.mvc.define.ControllerAdviceInstrumentati
 
 #### 4.2 插件加载流程
 
-```
-Agent 启动
-  │
-  ├── PluginFinder 扫描所有 META-INF/skywalking-plugin.def
-  │     ├── 读取每个插件的全限定类名
-  │     ├── 通过 PluginClassLoader 加载插件类
-  │     └── 调用每个插件的 define() 方法
-  │
-  ├── 构建匹配器
-  │     ├── 收集所有插件的 classNameMatch
-  │     ├── 合并为 ElementMatcher
-  │     └── 传递给 AgentBuilder
-  │
-  └── AgentBuilder 在类加载时触发匹配
-        ├── 匹配成功 → 应用插件增强
-        └── 匹配失败 → 跳过
+```mermaid
+graph TD
+    start["Agent 启动"]
+    start --> scan["PluginFinder 扫描所有 META-INF/skywalking-plugin.def"]
+    scan --> s1["读取每个插件的全限定类名"]
+    scan --> s2["通过 PluginClassLoader 加载插件类"]
+    scan --> s3["调用每个插件的 define() 方法"]
+    start --> build["构建匹配器"]
+    build --> b1["收集所有插件的 classNameMatch"]
+    build --> b2["合并为 ElementMatcher"]
+    build --> b3["传递给 AgentBuilder"]
+    start --> match["AgentBuilder 在类加载时触发匹配"]
+    match -- "匹配成功" --> enhance["应用插件增强"]
+    match -- "匹配失败" --> skip["跳过"]
 ```
 
 ### 5. 自定义插件开发实战

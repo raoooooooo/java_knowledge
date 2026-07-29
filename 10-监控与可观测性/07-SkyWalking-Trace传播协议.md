@@ -6,17 +6,16 @@
 
 在分布式系统中，同一个请求会经过多个服务节点。要让这些节点产生的 Span 能正确关联到同一个 Trace，必须有一个**跨进程传播协议**来传递 Trace 上下文。
 
-```
-┌──────────┐       ┌──────────┐       ┌──────────┐
-│ Service A │ ───→ │ Service B │ ───→ │ Service C │
-└──────────┘       └──────────┘       └──────────┘
-     │                   │                   │
-     │ 在 HTTP Header     │ 从 HTTP Header     │ 从 HTTP Header
-     │ 中注入 sw8 上下文   │ 中提取 sw8 上下文   │ 中提取 sw8 上下文
-     │                   │                   │
-     ▼                   ▼                   ▼
-  Segment-A           Segment-B           Segment-C
-  (同一个 traceId: abc123.1.1690000000000)
+```mermaid
+graph LR
+    A["Service A"] --> B["Service B"] --> C["Service C"]
+    A -. "在 HTTP Header 中注入 sw8 上下文" .-> segA["Segment-A"]
+    B -. "从 HTTP Header 中提取 sw8 上下文" .-> segB["Segment-B"]
+    C -. "从 HTTP Header 中提取 sw8 上下文" .-> segC["Segment-C"]
+    note["同一个 traceId: abc123.1.1690000000000"]
+    segA -.-> note
+    segB -.-> note
+    segC -.-> note
 ```
 
 ### 2. sw8 协议详解
@@ -151,20 +150,15 @@ executorService.submit(() -> {
 
 **为什么跨线程需要 ContextSnapshot？**
 
-```
-主线程                               工作线程
-  │                                    │
-  │ ContextManager.capture()           │
-  │  ↓ 快照当前 Trace 上下文             │
-  │  executorService.submit() ────────→│
-  │                                    │ ContextManager.continued(snapshot)
-  │                                    │  ↓ 恢复 Trace 上下文
-  │                                    │ doSomething()
-  │                                    │  ↓ 在工作线程中创建 Span
-  │                                    │  ↓ Span 与主线程的 Span 关联
-  │                                    │
-  ▼                                    ▼
-  主线程的 Segment  ├── Span-0 (Local, 异步任务)
+```mermaid
+sequenceDiagram
+    participant M as 主线程
+    participant W as 工作线程
+    M->>M: ContextManager.capture()<br/>快照当前 Trace 上下文
+    M->>W: executorService.submit()
+    W->>W: ContextManager.continued(snapshot)<br/>恢复 Trace 上下文
+    W->>W: doSomething()<br/>在工作线程中创建 Span<br/>Span 与主线程的 Span 关联
+    Note over M,W: 主线程的 Segment 包含 Span-0（Local，异步任务）
 ```
 
 ### 4. 跨语言传播
@@ -175,15 +169,16 @@ sw8 协议是语言无关的，所有语言的 SkyWalking Agent 都实现了相�
 - Go Agent 发起的请求 → 可以被 Node.js Agent 正确接收和关联
 - 任何语言的 Agent 产生的 Trace → 都可以被 OAP 正确组装
 
-```
-┌──────────────┐     sw8     ┌──────────────┐     sw8     ┌──────────────┐
-│ Java Agent   │ ─────────→  │ Go Agent     │ ─────────→  │ Python Agent │
-│ (OrderService)│             │(UserService) │             │(NotifyService)│
-└──────────────┘             └──────────────┘             └──────────────┘
-         │                          │                           │
-         ▼                          ▼                           ▼
-    Segment-A                   Segment-B                   Segment-C
-    traceId 相同: abc123.1.1690000000000
+```mermaid
+graph LR
+    java_agent["Java Agent<br/>（OrderService）"] -- "sw8" --> go_agent["Go Agent<br/>（UserService）"] -- "sw8" --> py_agent["Python Agent<br/>（NotifyService）"]
+    java_agent --> segA["Segment-A"]
+    go_agent --> segB["Segment-B"]
+    py_agent --> segC["Segment-C"]
+    note["traceId 相同: abc123.1.1690000000000"]
+    segA -.-> note
+    segB -.-> note
+    segC -.-> note
 ```
 
 ### 5. TraceId / SegmentId / SpanId 生成规则
@@ -251,38 +246,33 @@ parentSpanId = -1 表示根 Span
 
 **为什么两者设计差异这么大？**
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  SkyWalking 的设计哲学：可运维优先                                  │
-│                                                                   │
-│  排查问题时，工程师拿到 TraceId 就能：                              │
-│  1. 看时间戳 → 知道请求什么时间发生，快速定位日志范围               │
-│  2. 看线程号 → 推断并发情况，排查线程安全问题                      │
-│  3. 存储层 → 按时间戳分区，查询性能更快                            │
-│                                                                   │
-│  代价：TraceId 更长，不兼容 W3C 标准（需额外转换层）                │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph sw_philosophy["SkyWalking 的设计哲学：可运维优先"]
+        s1["1. 看时间戳 → 知道请求什么时间发生，快速定位日志范围"]
+        s2["2. 看线程号 → 推断并发情况，排查线程安全问题"]
+        s3["3. 存储层 → 按时间戳分区，查询性能更快"]
+        s4["代价：TraceId 更长，不兼容 W3C 标准（需额外转换层）"]
+        s1 --> s2 --> s3 --> s4
+    end
 
-┌──────────────────────────────────────────────────────────────────┐
-│  OpenTelemetry 的设计哲学：标准化优先                               │
-│                                                                   │
-│  W3C TraceContext 标准要求 TraceId 必须是 16 字节随机数：           │
-│  1. 固定长度，便于协议解析和传输                                   │
-│  2. 纯随机，不暴露任何语义信息（隐私友好）                          │
-│  3. 跨语言、跨厂商统一格式，便于生态集成                           │
-│                                                                   │
-│  代价：可读性差，排查问题时需要额外查时间戳字段                      │
-└──────────────────────────────────────────────────────────────────┘
+    subgraph otel_philosophy["OpenTelemetry 的设计哲学：标准化优先"]
+        o1["W3C TraceContext 标准要求 TraceId 必须是 16 字节随机数："]
+        o2["1. 固定长度，便于协议解析和传输"]
+        o3["2. 纯随机，不暴露任何语义信息（隐私友好）"]
+        o4["3. 跨语言、跨厂商统一格式，便于生态集成"]
+        o5["代价：可读性差，排查问题时需要额外查时间戳字段"]
+        o1 --> o2 --> o3 --> o4 --> o5
+    end
 ```
 
 **混合部署时的转换策略**：
 
 当 OTel Agent 发送 Trace 到 SkyWalking OAP 时，OTLP Receiver 会自动做转换：
 
-```
-OTel TraceId（32 位 hex） → 直接作为 SkyWalking TraceId 存储
-      ↓ （不需要生成新的 TraceId，直接使用 OTel 原生值）
-  SkyWalking 拓扑图和 Trace 详情页中展示的就是 OTel 原生 TraceId
+```mermaid
+graph TB
+    otel_id["OTel TraceId（32 位 hex）"] -- "直接作为 SkyWalking TraceId 存储<br/>（不需要生成新的 TraceId，直接使用 OTel 原生值）" --> display["SkyWalking 拓扑图和 Trace 详情页中展示的就是 OTel 原生 TraceId"]
 ```
 
 > ⚠️ **注意**：如果链路中一部分服务用 SkyWalking Agent，一部分用 OTel Agent，会出现"同一个 Trace 有两个 TraceId"的问题吗？**不会**——因为跨服务传播时，TraceId 是从上游传下来的。上游是 sw8 协议，下游就用 SkyWalking 格式的 TraceId；上游是 W3C 协议，下游就用 OTel 格式的 TraceId。关键是整条链路**传播协议要统一**（要么全 sw8，要么全 W3C），不要混用。

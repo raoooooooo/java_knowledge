@@ -14,12 +14,9 @@
 
 #### APM 的演进历程
 
-```
-传统监控（Zabbix/Nagios）
-  → 日志监控（ELK Stack）
-    → 指标监控（Prometheus/Grafana）
-      → APM（Pinpoint/SkyWalking）
-        → 可观测性（OpenTelemetry 统一标准）
+```mermaid
+graph LR
+    monitor["传统监控<br/>（Zabbix / Nagios）"] --> log["日志监控<br/>（ELK Stack）"] --> metric["指标监控<br/>（Prometheus / Grafana）"] --> apm["APM<br/>（Pinpoint / SkyWalking）"] --> obs["可观测性<br/>（OpenTelemetry 统一标准）"]
 ```
 
 - **传统监控**：关注主机层面（CPU、内存、磁盘、网络），无法感知应用内部状态
@@ -46,18 +43,16 @@
 
 #### 2.2 Span 的生命周期（Dapper 模型）
 
-```
-Client A                              Server B
-  |                                     |
-  |--- CS (Client Send) --------------->|  Span 开始
-  |                                     |
-  |                                     |  处理请求...
-  |                                     |
-  |<--- SR (Server Receive) 接收--------|  
-  |<--- SS (Server Send) 响应----------|
-  |                                     |
-  |--- CR (Client Receive) 收到---------|  Span 结束
-  |                                     |
+```mermaid
+sequenceDiagram
+    participant C as Client A
+    participant S as Server B
+    Note over C: Span 开始
+    C->>S: CS（Client Send）发起请求
+    Note over S: SR（Server Receive）收到请求
+    Note over S: 处理请求...
+    S-->>C: SS（Server Send）返回响应
+    Note over C: CR（Client Receive）收到响应，Span 结束
 ```
 
 - **CS（Client Send）**：客户端发起请求
@@ -97,57 +92,43 @@ Client A                              Server B
 
 ### 4. SkyWalking 架构全景
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            SkyWalking 架构全景                             │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                │
-│   │  Java Agent  │   │  Python Agent│   │  Node Agent  │  ...更多语言     │
-│   │  (最成熟)     │   │              │   │              │                │
-│   └──────┬───────┘   └──────┬───────┘   └──────┬───────┘                │
-│          │                  │                  │                         │
-│          │   gRPC/HTTP/Kafka (sw8 协议 / OTLP 协议)                       │
-│          │                  │                  │                         │
-│          ▼                  ▼                  ▼                         │
-│   ┌──────────────────────────────────────────────────────┐              │
-│   │                   OAP Server                         │              │
-│   │  ┌─────────┐  ┌──────────┐  ┌──────────────────┐   │              │
-│   │  │ Receiver │→│ Analyzer  │→│  Aggregator       │   │              │
-│   │  │ (接收层) │  │ (分析层)  │  │  (聚合层: OAL引擎) │   │              │
-│   │  └─────────┘  └──────────┘  └────────┬─────────┘   │              │
-│   │                                      │              │              │
-│   │                        ┌─────────────┴──────────┐   │              │
-│   │                        ▼                        ▼   │              │
-│   │                  ┌──────────┐           ┌──────────┐│              │
-│   │                  │  Query   │           │  Alarm   ││              │
-│   │                  │ (GraphQL)│           │ (告警引擎) ││              │
-│   │                  └──────────┘           └──────────┘│              │
-│   └──────────────────────┬───────────────────────────────┘              │
-│                          │                                               │
-│                          ▼                                               │
-│   ┌──────────────────────────────────────────────────────┐              │
-│   │                   存储层 (Storage)                     │              │
-│   │  ┌──────────┐  ┌──────────────┐  ┌──────────┐       │              │
-│   │  │ BanyanDB │  │Elasticsearch │  │  MySQL   │  ...  │              │
-│   │  │ (默认)    │  │              │  │          │       │              │
-│   │  └──────────┘  └──────────────┘  └──────────┘       │              │
-│   └──────────────────────────────────────────────────────┘              │
-│                          │                                               │
-│                          ▼                                               │
-│                   ┌──────────────┐                                       │
-│                   │   UI / CLI   │                                       │
-│                   │  (RocketBot) │                                       │
-│                   └──────────────┘                                       │
-│                                                                          │
-│   ┌──────────────────────────────────────────────────────┐              │
-│   │              附加组件                                  │              │
-│   │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │              │
-│   │  │ Satellite│  │  Rover   │  │  SWCK Operator   │   │              │
-│   │  │ (边车网关)│  │(eBPF监控)│  │  (K8s Operator)  │   │              │
-│   │  └──────────┘  └──────────┘  └──────────────────┘   │              │
-│   └──────────────────────────────────────────────────────┘              │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph probes["探针层（数据采集）"]
+        java_agent["Java Agent（最成熟）"]
+        python_agent["Python Agent"]
+        node_agent["Node Agent"]
+        more_lang["...更多语言"]
+    end
+
+    subgraph oap["OAP Server"]
+        receiver["Receiver（接收层）"] --> analyzer["Analyzer（分析层）"] --> aggregator["Aggregator（聚合层：OAL 引擎）"]
+        aggregator --> query["Query（GraphQL）"]
+        aggregator --> alarm["Alarm（告警引擎）"]
+    end
+
+    subgraph storage["存储层（Storage）"]
+        banyandb["BanyanDB（默认）"]
+        es["Elasticsearch"]
+        mysql["MySQL"]
+        storage_more["..."]
+    end
+
+    ui["UI / CLI（RocketBot）"]
+
+    subgraph extra["附加组件"]
+        satellite["Satellite（边车网关）"]
+        rover["Rover（eBPF 监控）"]
+        swck["SWCK Operator（K8s Operator）"]
+    end
+
+    java_agent -- "gRPC / HTTP / Kafka<br/>（sw8 协议 / OTLP 协议）" --> receiver
+    python_agent --> receiver
+    node_agent --> receiver
+    aggregator --> storage
+    ui -- "GraphQL 查询" --> query
+    satellite -. "数据转发" .-> receiver
+    rover -. "eBPF 指标上报" .-> receiver
 ```
 
 **三大核心组件**：
@@ -224,17 +205,26 @@ Client A                              Server B
 
 这是 SkyWalking 特有的数据模型（有别于 Dapper 论文）：
 
-```
-Trace（一次完整的请求调用链）
-  ├── Segment-1（服务A的视角，包含服务A处理该请求的所有Span）
-  │     ├── Span-0（Entry：接收外部请求）
-  │     ├── Span-1（Exit：调用服务B）
-  │     └── Span-2（Local：本地方法调用）
-  │
-  └── Segment-2（服务B的视角，包含服务B处理该请求的所有Span）
-        ├── Span-0（Entry：接收服务A的请求）
-        ├── Span-1（Exit：调用MySQL）
-        └── Span-2（Exit：调用Redis）
+```mermaid
+graph TD
+    trace["Trace（一次完整的请求调用链）"]
+    seg1["Segment-1（服务A的视角，包含服务A处理该请求的所有Span）"]
+    seg2["Segment-2（服务B的视角，包含服务B处理该请求的所有Span）"]
+    s10["Span-0（Entry：接收外部请求）"]
+    s11["Span-1（Exit：调用服务B）"]
+    s12["Span-2（Local：本地方法调用）"]
+    s20["Span-0（Entry：接收服务A的请求）"]
+    s21["Span-1（Exit：调用MySQL）"]
+    s22["Span-2（Exit：调用Redis）"]
+
+    trace --> seg1
+    trace --> seg2
+    seg1 --> s10
+    seg1 --> s11
+    seg1 --> s12
+    seg2 --> s20
+    seg2 --> s21
+    seg2 --> s22
 ```
 
 - **Span**：最小调用单元，代表一次具体的操作（RPC/DB/Cache/MQ）

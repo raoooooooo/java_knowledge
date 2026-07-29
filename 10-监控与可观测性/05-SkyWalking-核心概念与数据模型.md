@@ -6,24 +6,24 @@
 
 SkyWalking 使用 **服务 → 服务实例 → 端点** 三层模型来组织被监控的应用：
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  skywalking-user-service（Service = 服务）                       │
-│  ├── user-service-instance-1（ServiceInstance = 服务实例）        │
-│  │     ├── GET /user/{id}（Endpoint = 端点）                    │
-│  │     ├── POST /user/create（Endpoint = 端点）                 │
-│  │     └── PUT /user/update（Endpoint = 端点）                  │
-│  │                                                              │
-│  └── user-service-instance-2（ServiceInstance = 服务实例）        │
-│        ├── GET /user/{id}（Endpoint = 端点）                    │
-│        ├── POST /user/create（Endpoint = 端点）                 │
-│        └── PUT /user/update（Endpoint = 端点）                  │
-│                                                                  │
-│  skywalking-order-service（Service = 服务）                      │
-│  └── order-service-instance-1（ServiceInstance = 服务实例）       │
-│        ├── POST /order/create（Endpoint = 端点）                │
-│        └── GET /order/{id}（Endpoint = 端点）                   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph user_svc["skywalking-user-service（Service = 服务）"]
+        inst1["user-service-instance-1（ServiceInstance = 服务实例）"]
+        inst2["user-service-instance-2（ServiceInstance = 服务实例）"]
+        inst1 --> i1e1["GET /user/{id}（Endpoint = 端点）"]
+        inst1 --> i1e2["POST /user/create（Endpoint = 端点）"]
+        inst1 --> i1e3["PUT /user/update（Endpoint = 端点）"]
+        inst2 --> i2e1["GET /user/{id}（Endpoint = 端点）"]
+        inst2 --> i2e2["POST /user/create（Endpoint = 端点）"]
+        inst2 --> i2e3["PUT /user/update（Endpoint = 端点）"]
+    end
+
+    subgraph order_svc["skywalking-order-service（Service = 服务）"]
+        inst3["order-service-instance-1（ServiceInstance = 服务实例）"]
+        inst3 --> i3e1["POST /order/create（Endpoint = 端点）"]
+        inst3 --> i3e2["GET /order/{id}（Endpoint = 端点）"]
+    end
 ```
 
 #### 1.1 Service（服务）

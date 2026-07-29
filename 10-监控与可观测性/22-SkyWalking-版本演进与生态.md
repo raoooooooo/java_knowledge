@@ -15,66 +15,71 @@
 
 #### 1.2 v6（2018-2019）：OAP 架构诞生
 
-```
-v6 重大变化：
-├── OAP（Observability Analysis Platform）架构引入
-├── 模块化设计（ModuleDefine + ModuleProvider）
-├── gRPC 通信协议
-├── 引入 OAL 引擎
-├── 支持 Elasticsearch 存储
-└── 从孵化器毕业成为 Apache 顶级项目（2019.4）
+```mermaid
+graph TD
+    root["v6 重大变化"]
+    root --> c1["OAP（Observability Analysis Platform）架构引入"]
+    root --> c2["模块化设计（ModuleDefine + ModuleProvider）"]
+    root --> c3["gRPC 通信协议"]
+    root --> c4["引入 OAL 引擎"]
+    root --> c5["支持 Elasticsearch 存储"]
+    root --> c6["从孵化器毕业成为 Apache 顶级项目（2019.4）"]
 ```
 
 #### 1.3 v7（2019-2020）：生态扩展
 
-```
-v7 重大变化：
-├── 支持多种语言 Agent（Python、Node.js、Go）
-├── Service Mesh 集成（Istio/Envoy）
-├── 浏览器监控（Browser Agent）
-├── Profiling 性能剖析
-└── 动态配置中心
+```mermaid
+graph TD
+    root["v7 重大变化"]
+    root --> c1["支持多种语言 Agent（Python、Node.js、Go）"]
+    root --> c2["Service Mesh 集成（Istio/Envoy）"]
+    root --> c3["浏览器监控（Browser Agent）"]
+    root --> c4["Profiling 性能剖析"]
+    root --> c5["动态配置中心"]
 ```
 
 #### 1.4 v8（2020-2022）：语言引擎成熟
 
-```
-v8 重大变化：
-├── MAL（Meter Analysis Language）引入
-├── LAL（Log Analysis Language）引入
-├── Prometheus Fetcher
-├── Kafka Fetcher
-├── 事件系统（Event）
-├── 告警引擎重构
-└── Meter 指标体系完善
+```mermaid
+graph TD
+    root["v8 重大变化"]
+    root --> c1["MAL（Meter Analysis Language）引入"]
+    root --> c2["LAL（Log Analysis Language）引入"]
+    root --> c3["Prometheus Fetcher"]
+    root --> c4["Kafka Fetcher"]
+    root --> c5["事件系统（Event）"]
+    root --> c6["告警引擎重构"]
+    root --> c7["Meter 指标体系完善"]
 ```
 
 #### 1.5 v9（2022-2024）：现代化与标准化
 
-```
-v9 重大变化：
-├── UI 重构（RocketBot → 现代化 UI）
-├── 原生 OpenTelemetry 支持（OTLP Receiver）
-├── 移除 H2 集群模式（生产环境只用 ES/BanyanDB/MySQL）
-├── MQE（Metrics Query Engine）引入
-├── eBPF Rover 引入
-├── GenAI 监控
-├── Layer 分层重构
-├── Hierarchy 层级关系分析
-└── Helm Charts 简化部署
+```mermaid
+graph TD
+    root["v9 重大变化"]
+    root --> c1["UI 重构（RocketBot → 现代化 UI）"]
+    root --> c2["原生 OpenTelemetry 支持（OTLP Receiver）"]
+    root --> c3["移除 H2 集群模式（生产环境只用 ES/BanyanDB/MySQL）"]
+    root --> c4["MQE（Metrics Query Engine）引入"]
+    root --> c5["eBPF Rover 引入"]
+    root --> c6["GenAI 监控"]
+    root --> c7["Layer 分层重构"]
+    root --> c8["Hierarchy 层级关系分析"]
+    root --> c9["Helm Charts 简化部署"]
 ```
 
 #### 1.6 v10（2024+）：自研数据库时代
 
-```
-v10 重大变化：
-├── BanyanDB 成为默认存储引擎
-├── 分层拓扑（Layer Topology）
-├── 新的 Agent 协议（减少带宽 50%+）
-├── Satellite 边车网关
-├── SWCK Operator 生产可用
-├── Helm Charts 重大简化
-└── 性能大幅提升（写入性能 3x，查询性能 2x）
+```mermaid
+graph TD
+    root["v10 重大变化"]
+    root --> c1["BanyanDB 成为默认存储引擎"]
+    root --> c2["分层拓扑（Layer Topology）"]
+    root --> c3["新的 Agent 协议（减少带宽 50%+）"]
+    root --> c4["Satellite 边车网关"]
+    root --> c5["SWCK Operator 生产可用"]
+    root --> c6["Helm Charts 重大简化"]
+    root --> c7["性能大幅提升（写入性能 3x，查询性能 2x）"]
 ```
 
 ### 2. 社区与生态
@@ -83,14 +88,15 @@ v10 重大变化：
 
 SkyWalking 在 Apache 基金会的治理下运作：
 
-```
-Apache 治理结构：
-├── Board（董事会）：Apache 软件基金会最高决策机构
-├── PMC（Project Management Committee）：项目管理委员会
-│   ├── PMC Chair：项目主席
-│   └── PMC Members：PMC 成员
-├── Committers：提交者（有代码写入权限）
-└── Contributors：贡献者（提交 PR 的任何人）
+```mermaid
+graph TD
+    root["Apache 治理结构"]
+    root --> board["Board（董事会）<br/>Apache 软件基金会最高决策机构"]
+    root --> pmc["PMC（Project Management Committee）<br/>项目管理委员会"]
+    pmc --> pmc_chair["PMC Chair：项目主席"]
+    pmc --> pmc_members["PMC Members：PMC 成员"]
+    root --> committers["Committers：提交者（有代码写入权限）"]
+    root --> contributors["Contributors：贡献者（提交 PR 的任何人）"]
 ```
 
 **如何成为 Committer**：
@@ -125,25 +131,30 @@ Apache 治理结构：
 
 #### 3.1 从 APM 到可观测性
 
-```
-传统 APM（只关注应用性能）
-  → 可观测性（Traces + Metrics + Logs 统一）
+```mermaid
+graph LR
+    traditional["传统 APM<br/>（只关注应用性能）"] --> obs["可观测性<br/>（Traces + Metrics + Logs 统一）"]
 
-SkyWalking 的演进：
-├── v6-7：APM（Trace + 基础指标）
-├── v8：+ Metrics（MAL + Meter）
-├── v9：+ Logs（LAL + 日志关联）+ OpenTelemetry
-└── v10：+ eBPF（Rover）+ 自研数据库
+    subgraph sw_evolution["SkyWalking 的演进"]
+        direction TB
+        v67["v6-7：APM（Trace + 基础指标）"]
+        v8["v8：+ Metrics（MAL + Meter）"]
+        v9["v9：+ Logs（LAL + 日志关联）+ OpenTelemetry"]
+        v10["v10：+ eBPF（Rover）+ 自研数据库"]
+        v67 --> v8 --> v9 --> v10
+    end
 ```
 
 #### 3.2 OpenTelemetry 融合
 
 SkyWalking 正在从"独立的 APM 系统"向"OTel 生态的可观测性后端"演进：
 
-```
-短期（v9-v10）：sw8 和 OTLP 双协议共存
-中期（v10-v11）：OTLP 成为主要协议，sw8 逐步废弃
-长期（v11+）：SkyWalking 成为 OTel 生态的核心分析平台
+```mermaid
+flowchart LR
+    short["短期（v9-v10）<br/>sw8 和 OTLP 双协议共存"]
+    mid["中期（v10-v11）<br/>OTLP 成为主要协议，sw8 逐步废弃"]
+    long["长期（v11+）<br/>SkyWalking 成为 OTel 生态的核心分析平台"]
+    short --> mid --> long
 ```
 
 #### 3.3 自研数据库方向

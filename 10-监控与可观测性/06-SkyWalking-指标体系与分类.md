@@ -6,40 +6,16 @@
 
 SkyWalking 的指标体系分为五个层级，从宏观到微观：
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                    SkyWalking 指标体系全景                          │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  Level 1: Service 级别指标（服务整体健康度）                    │ │
-│  │  Apdex | Cpm(每分钟调用量) | SLA | RT(平均响应时间) |          │ │
-│  │  Throughput(吞吐量) | ErrorRate(错误率)                        │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  Level 2: ServiceInstance 级别指标（单个实例健康度）            │ │
-│  │  JVM内存(堆/非堆/直接内存) | JVM GC(次数/时间/阶段) |         │ │
-│  │  JVM线程(活跃/守护/峰值) | JVM CPU | JVM 类加载               │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  Level 3: Endpoint 级别指标（接口级别）                        │ │
-│  │  QPS | 延迟(P50/P75/P90/P95/P99) | 错误率 | 状态码分布       │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  Level 4: Relation 级别指标（服务间调用关系）                   │ │
-│  │  Client → Server 调用量/延迟/错误率（双向视角）                │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                              │                                    │
-│  ┌─────────────────────────────────────────────────────────────┐ │
-│  │  Level 5: Meter 自定义指标（基础设施/业务指标）                │ │
-│  │  Counter(计数器) | Gauge(瞬时值) | Histogram(分布) |          │ │
-│  │  DistributionSummary(摘要)                                    │ │
-│  └─────────────────────────────────────────────────────────────┘ │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph overview["SkyWalking 指标体系全景"]
+        l1["Level 1: Service 级别指标（服务整体健康度）<br/>Apdex ｜ Cpm（每分钟调用量）｜ SLA ｜ RT（平均响应时间）｜ Throughput（吞吐量）｜ ErrorRate（错误率）"]
+        l2["Level 2: ServiceInstance 级别指标（单个实例健康度）<br/>JVM内存（堆/非堆/直接内存）｜ JVM GC（次数/时间/阶段）｜ JVM线程（活跃/守护/峰值）｜ JVM CPU ｜ JVM 类加载"]
+        l3["Level 3: Endpoint 级别指标（接口级别）<br/>QPS ｜ 延迟（P50/P75/P90/P95/P99）｜ 错误率 ｜ 状态码分布"]
+        l4["Level 4: Relation 级别指标（服务间调用关系）<br/>Client → Server 调用量/延迟/错误率（双向视角）"]
+        l5["Level 5: Meter 自定义指标（基础设施/业务指标）<br/>Counter（计数器）｜ Gauge（瞬时值）｜ Histogram（分布）｜ DistributionSummary（摘要）"]
+        l1 --> l2 --> l3 --> l4 --> l5
+    end
 ```
 
 #### 1.1 指标层级与 Layer/Component 的关系
@@ -48,67 +24,58 @@ SkyWalking 的指标体系分为五个层级，从宏观到微观：
 
 **核心关系：Layer 决定"量什么"，五级层次决定"怎么量"。**
 
+```mermaid
+graph TB
+    subgraph general["GENERAL 层（通用服务）"]
+        g1["Service 级：Apdex、Cpm、SLA、RT、Throughput"]
+        g2["Endpoint 级：QPS、P99、HTTP 状态码分布"]
+        g3["Relation 级：Client/Server 双向调用指标"]
+    end
+
+    subgraph db_layer["DB 层（数据库）"]
+        d1["Service 级：连接数、慢查询数、QPS、响应时间"]
+        d2["Endpoint 级：SQL 语句级别的延迟、慢 SQL 检测"]
+        d3["Relation 级：哪个服务调了哪个数据库"]
+    end
+
+    subgraph cache_layer["CACHE 层（缓存）"]
+        c1["Service 级：命中率、QPS、响应时间、内存使用"]
+        c2["Endpoint 级：每个 Key 的访问次数、延迟"]
+        c3["Relation 级：哪个服务调了哪个缓存"]
+    end
+
+    subgraph mq_layer["MQ 层（消息队列）"]
+        m1["Service 级：生产速率、消费速率、消息积压、发送延迟"]
+        m2["Endpoint 级：每个 Topic 的生产/消费量"]
+        m3["Relation 级：哪个服务生产/消费了哪个 Topic"]
+    end
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Layer 与指标层级的关系                                            │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  同一个 Service 层级，不同 Layer 量的指标完全不同：                  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  GENERAL 层（通用服务）                                      │  │
-│  │  ├── Service 级：Apdex、Cpm、SLA、RT、Throughput            │  │
-│  │  ├── Endpoint 级：QPS、P99、HTTP 状态码分布                  │  │
-│  │  └── Relation 级：Client/Server 双向调用指标                 │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  DB 层（数据库）                                             │  │
-│  │  ├── Service 级：连接数、慢查询数、QPS、响应时间              │  │
-│  │  ├── Endpoint 级：SQL 语句级别的延迟、慢 SQL 检测             │  │
-│  │  └── Relation 级：哪个服务调了哪个数据库                       │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  CACHE 层（缓存）                                            │  │
-│  │  ├── Service 级：命中率、QPS、响应时间、内存使用             │  │
-│  │  ├── Endpoint 级：每个 Key 的访问次数、延迟                   │  │
-│  │  └── Relation 级：哪个服务调了哪个缓存                         │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  MQ 层（消息队列）                                           │  │
-│  │  ├── Service 级：生产速率、消费速率、消息积压、发送延迟       │  │
-│  │  ├── Endpoint 级：每个 Topic 的生产/消费量                    │  │
-│  │  └── Relation 级：哪个服务生产/消费了哪个 Topic               │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
-```
+
+同一个 Service 层级，不同 Layer 量的指标完全不同。
 
 **Component 的作用**：在同一个 Layer 内，不同 Component 的指标**计算方式相同**，但**标签值不同**，用来区分具体技术栈。
 
-```
 示例：DB 层下的两个服务
 
-┌──────────────────────────────────────────────────────────────────┐
-│  Service: "MySQL:192.168.1.1:3306"                                │
-│  ├── Layer: DB                                                    │
-│  ├── Component: MySQL (ID=2)                                      │
-│  ├── service_cpm: 5000                                            │
-│  ├── database_access_latency: 3ms                                 │
-│  └── database_slow_access: 12/min                                 │
-│                                                                   │
-│  Service: "PostgreSQL:192.168.1.2:5432"                           │
-│  ├── Layer: DB                                                    │
-│  ├── Component: PostgreSQL (ID=22)                                │
-│  ├── service_cpm: 3000       ← 同一套指标计算公式                   │
-│  ├── database_access_latency: 5ms                                 │
-│  └── database_slow_access: 3/min                                  │
-│                                                                   │
-│  两个数据库的指标类型完全一样（都是 DB 层的指标），                   │
-│  但 Component 不同，在 UI 中显示为不同的实例。                       │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph mysql_svc["Service: MySQL:192.168.1.1:3306"]
+        m_layer["Layer: DB"]
+        m_comp["Component: MySQL (ID=2)"]
+        m_cpm["service_cpm: 5000"]
+        m_lat["database_access_latency: 3ms"]
+        m_slow["database_slow_access: 12/min"]
+    end
+
+    subgraph pg_svc["Service: PostgreSQL:192.168.1.2:5432"]
+        p_layer["Layer: DB"]
+        p_comp["Component: PostgreSQL (ID=22)"]
+        p_cpm["service_cpm: 3000（同一套指标计算公式）"]
+        p_lat["database_access_latency: 5ms"]
+        p_slow["database_slow_access: 3/min"]
+    end
+
+    note["两个数据库的指标类型完全一样（都是 DB 层的指标），<br/>但 Component 不同，在 UI 中显示为不同的实例。"]
 ```
 
 **一句话总结**：
@@ -293,23 +260,11 @@ P99.9（第99.9个）= 5000ms
 
 这是 SkyWalking 最独特的指标维度。对于 A → B 的一次调用，SkyWalking 同时记录：
 
-```
-                    ┌───────────┐
-                    │  Service A │
-                    └─────┬─────┘
-                          │ 调用
-                          ▼
-                    ┌───────────┐
-                    │  Service B │
-                    └───────────┘
-
-Client 视角（ServiceRelation.ClientSide）：
-  - A 调用 B 的 QPS、延迟、成功率
-  - 从 A 的 Exit Span 中统计
-
-Server 视角（ServiceRelation.ServerSide）：
-  - B 被 A 调用的 QPS、延迟、成功率
-  - 从 B 的 Entry Span 中统计
+```mermaid
+graph LR
+    A["Service A"] -- "调用" --> B["Service B"]
+    A -. "Client 视角（ServiceRelation.ClientSide）<br/>A 调用 B 的 QPS、延迟、成功率<br/>（从 A 的 Exit Span 中统计）" .-> B
+    B -. "Server 视角（ServiceRelation.ServerSide）<br/>B 被 A 调用的 QPS、延迟、成功率<br/>（从 B 的 Entry Span 中统计）" .-> A
 ```
 
 **为什么需要双向视角？**
@@ -341,52 +296,52 @@ Meter（计量器）是 SkyWalking v8 引入的**通用指标接入框架**，�
 
 **Trace 指标的局限性**（只能算请求相关的）：
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Trace 指标（OAL 产出）只能覆盖：                                    │
-│                                                                   │
-│  ✅ 每个请求的响应时间（RT）→ 算出 p50/p99                         │
-│  ✅ 每分钟请求数（Cpm）→ 算出 QPS                                │
-│  ✅ 每个请求的成功/失败 → 算出 SLA / 错误率                        │
-│  ✅ 每个请求调用了哪个下游 → 算出 Relation 指标                     │
-│                                                                   │
-│  ❌ 无法覆盖：当前数据库连接数（不与任何请求绑定）                    │
-│  ❌ 无法覆盖：消息队列积压量（不与任何请求绑定）                      │
-│  ❌ 无法覆盖：订单总数（业务指标，不与 HTTP 请求绑定）                │
-│  ❌ 无法覆盖：主机 CPU 使用率（基础设施指标，在应用之外）            │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph covered["Trace 指标（OAL 产出）能覆盖"]
+        c1["每个请求的响应时间（RT）→ 算出 p50/p99"]
+        c2["每分钟请求数（Cpm）→ 算出 QPS"]
+        c3["每个请求的成功/失败 → 算出 SLA / 错误率"]
+        c4["每个请求调用了哪个下游 → 算出 Relation 指标"]
+    end
+
+    subgraph not_covered["Trace 指标无法覆盖"]
+        n1["当前数据库连接数（不与任何请求绑定）"]
+        n2["消息队列积压量（不与任何请求绑定）"]
+        n3["订单总数（业务指标，不与 HTTP 请求绑定）"]
+        n4["主机 CPU 使用率（基础设施指标，在应用之外）"]
+    end
 ```
 
 **Meter 的本质**：为 SkyWalking 打开一扇"后门"，让任何来源的、任何维度的指标，都能接入 SkyWalking 的分析和可视化体系。它是**"非 Trace 来源指标"的统一入口**。
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Meter = 所有"不来自 Trace"的指标的总称                             │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  第一类：基础设施指标（OS/中间件）                              │  │
-│  │  • 主机 CPU、内存、磁盘、网络                                  │  │
-│  │  • MySQL 连接数、慢查询数、QPS                                 │  │
-│  │  • Kafka Topic 的消息生产速率、消费速率、Lag 积压量             │  │
-│  │  • Redis 命中率、内存使用、连接数                               │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  第二类：应用内部指标（JVM / 自定义）                           │  │
-│  │  • JVM 堆内存、非堆内存、GC 次数、GC 耗时                      │  │
-│  │  • 线程池活跃线程数、队列长度、拒绝策略触发次数                 │  │
-│  │  • 自定义业务指标：每分钟订单数、每分钟支付成功数、库存告警阈值   │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  第三类：外部系统指标（第三方监控）                           │  │
-│  │  • Prometheus Exporter 暴露的指标                             │  │
-│  │  • OpenTelemetry SDK 采集的 Metrics                           │  │
-│  │  • Micrometer 采集的 Spring Boot Actuator 指标                │  │
-│  │  • Telegraf / Zabbix 采集的系统监控数据                        │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    title["Meter = 所有「不来自 Trace」的指标的总称"]
+
+    subgraph infra["第一类：基础设施指标（OS/中间件）"]
+        i1["主机 CPU、内存、磁盘、网络"]
+        i2["MySQL 连接数、慢查询数、QPS"]
+        i3["Kafka Topic 的消息生产速率、消费速率、Lag 积压量"]
+        i4["Redis 命中率、内存使用、连接数"]
+    end
+
+    subgraph app_internal["第二类：应用内部指标（JVM / 自定义）"]
+        a1["JVM 堆内存、非堆内存、GC 次数、GC 耗时"]
+        a2["线程池活跃线程数、队列长度、拒绝策略触发次数"]
+        a3["自定义业务指标：每分钟订单数、每分钟支付成功数、库存告警阈值"]
+    end
+
+    subgraph external["第三类：外部系统指标（第三方监控）"]
+        e1["Prometheus Exporter 暴露的指标"]
+        e2["OpenTelemetry SDK 采集的 Metrics"]
+        e3["Micrometer 采集的 Spring Boot Actuator 指标"]
+        e4["Telegraf / Zabbix 采集的系统监控数据"]
+    end
+
+    title --> infra
+    title --> app_internal
+    title --> external
 ```
 
 **一句话总结**：Trace 指标是"**从请求调用链里提炼出来的指标**"（请求驱动），Meter 指标是"**所有不是从调用链里来的指标**"（定时采集驱动）。两者在 SkyWalking UI 中统一展示，但来源和分析引擎完全不同（Trace → OAL，Meter → MAL）。
@@ -426,44 +381,26 @@ metricsRules:
 
 很多初学者会混淆：用 OpenTelemetry 采集指标走 Meter，那 OTel 的调用链（Traces）去哪了？**答案是：OTel 发送的是三种信号，SkyWalking 分别走三条不同的处理管道。**
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  OpenTelemetry SDK 发送三种信号到 SkyWalking OAP                   │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌─────────────────────┐                                          │
-│  │  OTel Java Agent    │                                          │
-│  │  (或 OTel SDK)       │                                          │
-│  └────────┬────────────┘                                          │
-│           │ OTLP 协议（gRPC :4317 或 HTTP :4318）                   │
-│           ▼                                                       │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  SkyWalking OAP — OTLP Receiver                            │  │
-│  │                                                            │  │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌────────────┐ │  │
-│  │  │  OTel Traces    │  │  OTel Metrics   │  │  OTel Logs  │ │  │
-│  │  │  (Spans)        │  │  (Counter/Gauge/│  │  (LogRecords│ │  │
-│  │  │                 │  │   Histogram)     │  │   )         │ │  │
-│  │  └───────┬─────────┘  └───────┬─────────┘  └──────┬─────┘ │  │
-│  │          │                    │                    │       │  │
-│  └──────────┼────────────────────┼────────────────────┼───────┘  │
-│             │                    │                    │           │
-│             ▼                    ▼                    ▼           │
-│  ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐  │
-│  │  Trace 管道       │ │  Meter 管道       │ │  Log 管道         │  │
-│  │  (TraceAnalyzer) │ │  (MAL 引擎)       │ │  (LAL 引擎)       │  │
-│  │                  │ │                  │ │                  │  │
-│  │  OTel Span →     │ │  OTel Counter →  │ │  OTel LogRecord  │  │
-│  │  SkyWalking      │ │  SkyWalking      │ │  → SkyWalking    │  │
-│  │  Segment/Span    │ │  Meter 指标      │ │  Log 记录        │  │
-│  │                  │ │                  │ │                  │  │
-│  │  → OAL 聚合      │ │  → MAL 聚合      │ │  → LAL 分析      │  │
-│  │  → Service/      │ │  → Meter 指标    │ │  → 日志指标      │  │
-│  │    Endpoint/     │ │    存储          │ │    存储          │  │
-│  │    Relation 指标 │ │                  │ │                  │  │
-│  └──────────────────┘ └──────────────────┘ └──────────────────┘  │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    otel["OTel Java Agent（或 OTel SDK）"]
+
+    subgraph receiver["SkyWalking OAP — OTLP Receiver"]
+        traces["OTel Traces（Spans）"]
+        metrics["OTel Metrics（Counter/Gauge/Histogram）"]
+        logs["OTel Logs（LogRecords）"]
+    end
+
+    trace_pipe["Trace 管道（TraceAnalyzer）<br/>OTel Span → SkyWalking Segment/Span<br/>→ OAL 聚合<br/>→ Service / Endpoint / Relation 指标"]
+    meter_pipe["Meter 管道（MAL 引擎）<br/>OTel Counter → SkyWalking Meter 指标<br/>→ MAL 聚合<br/>→ Meter 指标存储"]
+    log_pipe["Log 管道（LAL 引擎）<br/>OTel LogRecord → SkyWalking Log 记录<br/>→ LAL 分析<br/>→ 日志指标存储"]
+
+    otel -- "OTLP 协议（gRPC :4317 或 HTTP :4318）" --> traces
+    otel --> metrics
+    otel --> logs
+    traces --> trace_pipe
+    metrics --> meter_pipe
+    logs --> log_pipe
 ```
 
 **核心结论**：

@@ -8,36 +8,28 @@
 
 SkyWalking Browser Agent 是一个**前端 JavaScript 探针**，部署在 Web 页面中，用于监控前端性能和用户行为。
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  浏览器监控架构                                                    │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  浏览器端（Browser Agent）                                  │   │
-│  │  ├── 页面性能指标（FP/FCP/LCP/CLS/FID/TTFB）              │   │
-│  │  ├── 错误收集（JS Error/Promise Rejection/Resource Error）│   │
-│  │  ├── XHR/Fetch 请求追踪                                   │   │
-│  │  └── 用户行为（PV/UV/Click/Route Change）                  │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                    │
-│                         HTTP/gRPC                                 │
-│                              │                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  OAP（Browser Receiver）                                   │   │
-│  │  ├── 聚合页面性能指标（按 App/Page/Version）               │   │
-│  │  ├── 关联前端错误和后端 Trace                              │   │
-│  │  └── 存储到 BanyanDB/ES                                   │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                    │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  UI（浏览器监控面板）                                       │   │
-│  │  ├── 页面性能仪表盘                                         │   │
-│  │  ├── 错误统计和详情                                         │   │
-│  │  └── 用户行为分析                                           │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph browser_agent["浏览器端（Browser Agent）"]
+        perf["页面性能指标（FP/FCP/LCP/CLS/FID/TTFB）"]
+        error["错误收集（JS Error/Promise Rejection/Resource Error）"]
+        xhr["XHR/Fetch 请求追踪"]
+        behavior["用户行为（PV/UV/Click/Route Change）"]
+    end
+
+    subgraph oap["OAP（Browser Receiver）"]
+        agg["聚合页面性能指标（按 App/Page/Version）"]
+        correlate["关联前端错误和后端 Trace"]
+        store["存储到 BanyanDB/ES"]
+    end
+
+    subgraph ui["UI（浏览器监控面板）"]
+        dash["页面性能仪表盘"]
+        err_stat["错误统计和详情"]
+        user_analysis["用户行为分析"]
+    end
+
+    browser_agent -- "HTTP/gRPC" --> oap --> ui
 ```
 
 #### 1.2 Web Vitals 核心指标
@@ -84,19 +76,13 @@ SkyWalking Browser Agent 是一个**前端 JavaScript 探针**，部署在 Web �
 
 #### 1.4 前端错误与后端 Trace 关联
 
-```
 前端错误 → 后端 Trace 关联流程：
 
-1. 后端在 HTTP Response Header 中注入 TraceId
-   └── Response Header: sw8 = "...traceId..."
-
-2. Browser Agent 从 Response 中提取 TraceId
-   └── 将 TraceId 关联到前端错误事件
-
-3. 前端错误事件上报到 OAP
-   └── 携带 TraceId
-
-4. 在 UI 中，可以从前端错误直接跳转到后端 Trace
+```mermaid
+graph LR
+    s1["1. 后端在 HTTP Response Header 中注入 TraceId<br/>Response Header: sw8 = ...traceId..."] --> s2["2. Browser Agent 从 Response 中提取 TraceId<br/>将 TraceId 关联到前端错误事件"]
+    s2 --> s3["3. 前端错误事件上报到 OAP<br/>携带 TraceId"]
+    s3 --> s4["4. 在 UI 中，可以从前端错误直接跳转到后端 Trace"]
 ```
 
 ### 2. Service Mesh 集成
@@ -107,39 +93,19 @@ Service Mesh（服务网格）是云原生架构中的**基础设施层**，用�
 
 #### 2.2 SkyWalking + Istio/Envoy 集成
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Service Mesh 可观测性架构                                        │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  Pod                                                      │   │
-│  │  ┌──────────┐    ┌──────────┐                            │   │
-│  │  │  App     │───→│  Envoy   │───→ 网络                    │   │
-│  │  │ Container│    │ Sidecar  │                            │   │
-│  │  └──────────┘    └────┬─────┘                            │   │
-│  │                       │                                   │   │
-│  │                       │ ALS (Access Log Service)          │   │
-│  │                       ▼                                   │   │
-│  │                 ┌──────────┐                              │   │
-│  │                 │ SkyWalking│                             │   │
-│  │                 │   OAP    │                              │   │
-│  │                 └──────────┘                              │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-│  数据来源：                                                       │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │ ① Envoy ALS（Access Log Service）                         │   │
-│  │    └── Envoy 将每次请求的访问日志发送给 OAP                │   │
-│  │                                                           │   │
-│  │ ② Istio Mixer（已废弃，新版本用 Envoy ALS）                │   │
-│  │    └── Istio 的遥测数据通过 Mixer 适配器发送给 OAP         │   │
-│  │                                                           │   │
-│  │ ③ Envoy Metrics Service                                  │   │
-│  │    └── Envoy 的指标数据（QPS、延迟、错误率）               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph pod["Pod"]
+        app["App Container"] --> envoy["Envoy Sidecar"]
+        envoy --> network["网络"]
+        envoy -- "ALS（Access Log Service）" --> oap["SkyWalking OAP"]
+    end
+
+    subgraph sources["数据来源"]
+        als["① Envoy ALS（Access Log Service）<br/>Envoy 将每次请求的访问日志发送给 OAP"]
+        mixer["② Istio Mixer（已废弃，新版本用 Envoy ALS）<br/>Istio 的遥测数据通过 Mixer 适配器发送给 OAP"]
+        metrics["③ Envoy Metrics Service<br/>Envoy 的指标数据（QPS、延迟、错误率）"]
+    end
 ```
 
 #### 2.3 Access Log Service（ALS）分析
@@ -186,28 +152,30 @@ spec:
 
 Satellite 是 SkyWalking 的**边车网关**，部署在 Agent 和 OAP 之间：
 
-```
-Agent → Satellite → OAP
-
-Satellite 的职责：
-├── 数据缓存（OAP 不可用时缓存数据）
-├── 数据转发（负载均衡）
-├── 数据过滤（采样/清洗）
-├── 安全网关（TLS/mTLS 终止）
-└── 协议转换（sw8 ↔ OTLP）
+```mermaid
+graph LR
+    agent["Agent"] --> satellite["Satellite"] --> oap["OAP"]
+    satellite --> duty1["数据缓存（OAP 不可用时缓存数据）"]
+    satellite --> duty2["数据转发（负载均衡）"]
+    satellite --> duty3["数据过滤（采样/清洗）"]
+    satellite --> duty4["安全网关（TLS/mTLS 终止）"]
+    satellite --> duty5["协议转换（sw8 ↔ OTLP）"]
 ```
 
 ### 5. eBPF Rover（无侵入内核级监控）
 
 Rover 是 SkyWalking 的 **eBPF 探针**，通过 eBPF 技术在内核层面监控网络流量和系统指标：
 
-```
 Rover 的监控能力：
-├── 网络流量分析（TCP/UDP 连接追踪）
-├── 进程级 CPU/内存/磁盘监控
-├── 文件 I/O 监控
-├── DNS 查询监控
-└── 无需修改应用代码，无需安装 Agent
+
+```mermaid
+graph TD
+    rover["Rover（eBPF 探针）"]
+    rover --> net["网络流量分析（TCP/UDP 连接追踪）"]
+    rover --> proc["进程级 CPU/内存/磁盘监控"]
+    rover --> io["文件 I/O 监控"]
+    rover --> dns["DNS 查询监控"]
+    rover --> noagent["无需修改应用代码，无需安装 Agent"]
 ```
 
 ---

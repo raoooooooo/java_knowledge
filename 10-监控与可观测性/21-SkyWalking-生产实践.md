@@ -6,51 +6,50 @@
 
 #### 1.1 1000+ Agent 的部署架构
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  大规模部署架构（1000+ Agent）                                      │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  应用层（1000+ Agent）                                      │   │
-│  │  ┌────────┐ ┌────────┐ ┌────────┐     ┌────────┐        │   │
-│  │  │App 1   │ │App 2   │ │App 3   │ ... │App N   │        │   │
-│  │  │+ Agent │ │+ Agent │ │+ Agent │     │+ Agent │        │   │
-│  │  └───┬────┘ └───┬────┘ └───┬────┘     └───┬────┘        │   │
-│  └──────┼──────────┼──────────┼───────────────┼──────────────┘   │
-│         │          │          │               │                   │
-│         │          │     Kafka Cluster（可选）  │                   │
-│         │          │          │               │                   │
-│         ▼          ▼          ▼               ▼                   │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  OAP Receiver 层（3-5 节点，无状态）                        │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                 │    │
-│  │  │Receiver 1│ │Receiver 2│ │Receiver 3│                 │    │
-│  │  └────┬─────┘ └────┬─────┘ └────┬─────┘                 │    │
-│  └───────┼─────────────┼─────────────┼───────────────────────┘    │
-│          │             │             │                             │
-│          │        gRPC 转发（数据分片）                              │
-│          │             │             │                             │
-│          ▼             ▼             ▼                             │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  OAP Aggregator 层（5-7 节点，有状态）                       │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                 │    │
-│  │  │Aggreg. 1 │ │Aggreg. 2 │ │Aggreg. 3 │                 │    │
-│  │  │(分片 0-49)│ │(分片50-99)│ │(分片100+)│                 │    │
-│  │  └────┬─────┘ └────┬─────┘ └────┬─────┘                 │    │
-│  └───────┼─────────────┼─────────────┼───────────────────────┘    │
-│          │             │             │                             │
-│          └─────────────┼─────────────┘                             │
-│                        │                                           │
-│                        ▼                                           │
-│  ┌──────────────────────────────────────────────────────────┐    │
-│  │  Storage 集群（BanyanDB/ES）                               │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                 │    │
-│  │  │ Node 1   │ │ Node 2   │ │ Node 3   │                 │    │
-│  │  └──────────┘ └──────────┘ └──────────┘                 │    │
-│  └──────────────────────────────────────────────────────────┘    │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph app_layer["应用层（1000+ Agent）"]
+        app1["App 1<br/>+ Agent"]
+        app2["App 2<br/>+ Agent"]
+        app3["App 3<br/>+ Agent"]
+        appn["...<br/>App N<br/>+ Agent"]
+    end
+
+    subgraph kafka_layer["Kafka Cluster（可选）"]
+        kafka["Kafka Broker 集群"]
+    end
+
+    subgraph receiver_layer["OAP Receiver 层（3-5 节点，无状态）"]
+        rec1["Receiver 1"]
+        rec2["Receiver 2"]
+        rec3["Receiver 3"]
+    end
+
+    subgraph aggregator_layer["OAP Aggregator 层（5-7 节点，有状态）"]
+        agg1["Aggreg. 1<br/>（分片 0-49）"]
+        agg2["Aggreg. 2<br/>（分片 50-99）"]
+        agg3["Aggreg. 3<br/>（分片 100+）"]
+    end
+
+    subgraph storage_layer["Storage 集群（BanyanDB/ES）"]
+        node1["Node 1"]
+        node2["Node 2"]
+        node3["Node 3"]
+    end
+
+    app1 --> kafka
+    app2 --> kafka
+    app3 --> kafka
+    appn --> kafka
+    kafka --> rec1
+    kafka --> rec2
+    kafka --> rec3
+    rec1 -->|"gRPC 转发（数据分片）"| agg1
+    rec2 -->|"gRPC 转发（数据分片）"| agg2
+    rec3 -->|"gRPC 转发（数据分片）"| agg3
+    agg1 --> node1
+    agg2 --> node2
+    agg3 --> node3
 ```
 
 #### 1.2 JVM 调优建议
@@ -100,80 +99,76 @@ JAVA_OPTS="
 
 #### 2.2 ES 集群规划
 
-```
-Agent 数量 → ES 集群规模建议：
+**Agent 数量 → ES 集群规模建议：**
 
-< 100 Agent → 3 节点（1 master + 2 data）
-100-500 Agent → 5 节点（3 master + 2 data）
-500-1000 Agent → 7 节点（3 master + 4 data）
-> 1000 Agent → 考虑 BanyanDB 或 ES 独立集群
+```mermaid
+graph LR
+    A["< 100 Agent"] --> B["3 节点<br/>（1 master + 2 data）"]
+    C["100-500 Agent"] --> D["5 节点<br/>（3 master + 2 data）"]
+    E["500-1000 Agent"] --> F["7 节点<br/>（3 master + 4 data）"]
+    G["> 1000 Agent"] --> H["考虑 BanyanDB<br/>或 ES 独立集群"]
 ```
 
 ### 3. 常见问题排查
 
 #### 3.1 Agent 不上报数据
 
-```
-排查步骤：
-1. 检查 Agent 日志
-   └── 查找 "SkyWalking agent starting" 日志
-   └── 查找 "Register Service" 日志
-   └── 查找连接错误日志
-
-2. 检查网络连通性
-   └── telnet oap-server 11800
-
-3. 检查配置
-   └── agent.service_name 是否配置
-   └── collector.backend_service 是否配置正确
-
-4. 检查 OAP 日志
-   └── 是否有服务注册成功的日志
-
-5. 常见原因
-   ├── OAP 地址配置错误
-   ├── 防火墙阻止 11800 端口
-   ├── Agent 版本与 OAP 版本不兼容
-   └── 服务名包含特殊字符
+```mermaid
+graph TD
+    root["Agent 不上报数据 · 排查步骤"]
+    root --> step1["1. 检查 Agent 日志"]
+    step1 --> s1a["查找 SkyWalking agent starting 日志"]
+    step1 --> s1b["查找 Register Service 日志"]
+    step1 --> s1c["查找连接错误日志"]
+    root --> step2["2. 检查网络连通性"]
+    step2 --> s2a["telnet oap-server 11800"]
+    root --> step3["3. 检查配置"]
+    step3 --> s3a["agent.service_name 是否配置"]
+    step3 --> s3b["collector.backend_service 是否配置正确"]
+    root --> step4["4. 检查 OAP 日志"]
+    step4 --> s4a["是否有服务注册成功的日志"]
+    root --> step5["5. 常见原因"]
+    step5 --> s5a["OAP 地址配置错误"]
+    step5 --> s5b["防火墙阻止 11800 端口"]
+    step5 --> s5c["Agent 版本与 OAP 版本不兼容"]
+    step5 --> s5d["服务名包含特殊字符"]
 ```
 
 #### 3.2 拓扑图不完整
 
-```
-排查步骤：
-1. 检查是否所有服务都安装了 Agent
-2. 检查跨线程传播是否正确配置
-   └── 异步线程池是否使用了 ContextSnapshot
-3. 检查 ignore_suffix 配置
-   └── 某些端点是否被忽略
-4. 检查采样率
-   └── 采样率太低导致部分调用关系丢失
-
-常见原因：
-├── 异步线程未使用 ContextSnapshot
-├── MQ 消费者未安装 Agent
-└── 数据库/缓存没有 Agent（显示为虚拟服务）
+```mermaid
+graph TD
+    root["拓扑图不完整 · 排查步骤"]
+    root --> step1["1. 检查是否所有服务都安装了 Agent"]
+    root --> step2["2. 检查跨线程传播是否正确配置"]
+    step2 --> s2a["异步线程池是否使用了 ContextSnapshot"]
+    root --> step3["3. 检查 ignore_suffix 配置"]
+    step3 --> s3a["某些端点是否被忽略"]
+    root --> step4["4. 检查采样率"]
+    step4 --> s4a["采样率太低导致部分调用关系丢失"]
+    root --> common["常见原因"]
+    common --> c1["异步线程未使用 ContextSnapshot"]
+    common --> c2["MQ 消费者未安装 Agent"]
+    common --> c3["数据库/缓存没有 Agent<br/>（显示为虚拟服务）"]
 ```
 
 #### 3.3 OAP 内存溢出
 
-```
-排查步骤：
-1. 检查 DataCarrier 是否积压
-   └── 查看 OAP 指标：oap_analysis_latency
-
-2. 检查 GC 日志
-   └── Full GC 频率是否过高
-
-3. 检查存储连接
-   └── ES/BanyanDB 是否可访问
-
-4. 解决方案
-   ├── 增加堆内存（-Xmx）
-   ├── 降低采样率（减少数据处理量）
-   ├── 检查 ES 集群健康状态
-   ├── 启用 G1 GC
-   └── 分离 Receiver 和 Aggregator
+```mermaid
+graph TD
+    root["OAP 内存溢出 · 排查步骤"]
+    root --> step1["1. 检查 DataCarrier 是否积压"]
+    step1 --> s1a["查看 OAP 指标：oap_analysis_latency"]
+    root --> step2["2. 检查 GC 日志"]
+    step2 --> s2a["Full GC 频率是否过高"]
+    root --> step3["3. 检查存储连接"]
+    step3 --> s3a["ES/BanyanDB 是否可访问"]
+    root --> step4["4. 解决方案"]
+    step4 --> sol1["增加堆内存（-Xmx）"]
+    step4 --> sol2["降低采样率（减少数据处理量）"]
+    step4 --> sol3["检查 ES 集群健康状态"]
+    step4 --> sol4["启用 G1 GC"]
+    step4 --> sol5["分离 Receiver 和 Aggregator"]
 ```
 
 ### 4. 监控自监控（OAP Telemetry）
@@ -202,34 +197,28 @@ telemetry:
 
 ### 5. 与 Prometheus + Grafana + Loki 协同方案
 
-```
-完整可观测性方案：
+**完整可观测性方案：**
 
-┌──────────────────────────────────────────────────────────────────┐
-│  可观测性技术栈                                                   │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │  SkyWalking   │  │  Prometheus  │  │  Loki                │   │
-│  │  (Trace +     │  │  (Metrics)   │  │  (Logs)              │   │
-│  │   APM指标)    │  │              │  │                      │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘   │
-│         │                 │                      │                │
-│         └─────────────────┼──────────────────────┘                │
-│                           │                                       │
-│                           ▼                                       │
-│                   ┌──────────────┐                                │
-│                   │   Grafana    │                                │
-│                   │  (统一展示)   │                                │
-│                   └──────────────┘                                │
-│                                                                   │
-│  分工：                                                           │
-│  ├── SkyWalking：分布式追踪 + 应用层指标 + 服务拓扑               │
-│  ├── Prometheus：基础设施指标 + 业务指标 + 告警                   │
-│  ├── Loki：日志聚合 + 全文搜索                                   │
-│  └── Grafana：统一仪表盘 + 告警管理                              │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph obs_stack["可观测性技术栈"]
+        subgraph data_sources["数据采集层"]
+            skywalking["SkyWalking<br/>（Trace + APM指标）"]
+            prometheus["Prometheus<br/>（Metrics）"]
+            loki["Loki<br/>（Logs）"]
+        end
+        grafana["Grafana<br/>（统一展示）"]
+        skywalking --> grafana
+        prometheus --> grafana
+        loki --> grafana
+    end
+
+    subgraph responsibilities["分工"]
+        r1["SkyWalking：分布式追踪 + 应用层指标 + 服务拓扑"]
+        r2["Prometheus：基础设施指标 + 业务指标 + 告警"]
+        r3["Loki：日志聚合 + 全文搜索"]
+        r4["Grafana：统一仪表盘 + 告警管理"]
+    end
 ```
 
 ---

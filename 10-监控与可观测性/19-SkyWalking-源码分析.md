@@ -6,58 +6,49 @@
 
 本章从**端到端**的角度，追踪一次 HTTP 请求在 SkyWalking 中的完整链路：
 
+```mermaid
+graph LR
+    s1["① Agent 端：请求拦截 → Span 创建 → 上下文注入 → 出口上报"] --> s2["② 网络传输：gRPC 流式上报 → Protobuf 序列化"]
+    s2 --> s3["③ OAP 端：DataCarrier 接收 → TraceAnalyzer 解析 → OAL 聚合"]
+    s3 --> s4["④ 存储层：指标写入 → TTL 清理"]
+    s4 --> s5["⑤ 查询层：GraphQL 查询 → UI 展示"]
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  源码分析路线图：一次 HTTP 请求的完整生命                              │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ① Agent 端：请求拦截 → Span 创建 → 上下文注入 → 出口上报          │
-│  ② 网络传输：gRPC 流式上报 → Protobuf 序列化                      │
-│  ③ OAP 端：DataCarrier 接收 → TraceAnalyzer 解析 → OAL 聚合       │
-│  ④ 存储层：指标写入 → TTL 清理                                    │
-│  ⑤ 查询层：GraphQL 查询 → UI 展示                                 │
-│                                                                   │
-└──────────────────────────────────────────────────────────────────┘
-```
+
+源码分析路线图：一次 HTTP 请求的完整生命
 
 ### 2. Agent 端源码分析
 
 #### 2.1 启动流程
 
-```
-SkyWalkingAgent.premain(String agentArgs, Instrumentation instrumentation)
-  │
-  ├── 1. 加载配置
-  │     └── SnifferConfigInitializer.initializeCoreConfig(agentArgs)
-  │           ├── 读取 agent.config 文件
-  │           ├── 读取系统属性（-D 参数）
-  │           └── 合并配置（系统属性优先）
-  │
-  ├── 2. 加载插件
-  │     └── PluginFinder pluginFinder = new PluginFinder(
-  │           new PluginBootstrap().loadPlugins()
-  │         )
-  │           ├── 扫描 plugins/ 目录下的所有 JAR
-  │           ├── 读取 META-INF/skywalking-plugin.def
-  │           ├── 通过 PluginClassLoader 加载插件类
-  │           └── 构建 PluginFinder（插件查找器）
-  │
-  ├── 3. 初始化服务管理器
-  │     └── ServiceManager.INSTANCE.boot()
-  │           ├── GRPCChannelManager：管理 gRPC 连接
-  │           ├── ServiceAndEndpointRegisterClient：服务注册
-  │           ├── TraceSegmentServiceClient：Trace 上报
-  │           ├── JVMService：JVM 指标采集
-  │           └── SamplingService：采样控制
-  │
-  ├── 4. 注册 ClassFileTransformer
-  │     └── new AgentBuilder.Default()
-  │           .type(pluginFinder.buildMatch())   // 构建类匹配器
-  │           .transform(new Transformer())       // 字节码转换
-  │           .with(new Listener())               // 转换监听器
-  │           .installOn(instrumentation)         // 安装到 JVM
-  │
-  └── 5. 启动完成，Agent 开始工作
+```mermaid
+graph TD
+    premain["SkyWalkingAgent.premain(String agentArgs, Instrumentation instrumentation)"]
+
+    premain --> step1["1. 加载配置<br/>SnifferConfigInitializer.initializeCoreConfig(agentArgs)"]
+    step1 --> s11["读取 agent.config 文件"]
+    step1 --> s12["读取系统属性（-D 参数）"]
+    step1 --> s13["合并配置（系统属性优先）"]
+
+    premain --> step2["2. 加载插件<br/>PluginFinder pluginFinder = new PluginFinder(new PluginBootstrap().loadPlugins())"]
+    step2 --> s21["扫描 plugins/ 目录下的所有 JAR"]
+    step2 --> s22["读取 META-INF/skywalking-plugin.def"]
+    step2 --> s23["通过 PluginClassLoader 加载插件类"]
+    step2 --> s24["构建 PluginFinder（插件查找器）"]
+
+    premain --> step3["3. 初始化服务管理器<br/>ServiceManager.INSTANCE.boot()"]
+    step3 --> s31["GRPCChannelManager：管理 gRPC 连接"]
+    step3 --> s32["ServiceAndEndpointRegisterClient：服务注册"]
+    step3 --> s33["TraceSegmentServiceClient：Trace 上报"]
+    step3 --> s34["JVMService：JVM 指标采集"]
+    step3 --> s35["SamplingService：采样控制"]
+
+    premain --> step4["4. 注册 ClassFileTransformer<br/>new AgentBuilder.Default()"]
+    step4 --> s41[".type(pluginFinder.buildMatch()) — 构建类匹配器"]
+    s41 --> s42[".transform(new Transformer()) — 字节码转换"]
+    s42 --> s43[".with(new Listener()) — 转换监听器"]
+    s43 --> s44[".installOn(instrumentation) — 安装到 JVM"]
+
+    premain --> step5["5. 启动完成，Agent 开始工作"]
 ```
 
 #### 2.2 请求拦截与 Span 创建
@@ -148,31 +139,25 @@ public static void stopSpan() {
 
 #### 3.1 模块启动流程
 
-```
-OAPServerBootstrap.main()
-  │
-  ├── 1. 加载 application.yml
-  │     └── ApplicationConfigLoader.load()
-  │
-  ├── 2. 初始化 ModuleManager
-  │     └── ModuleManager manager = new ModuleManager()
-  │
-  ├── 3. 初始化模块（prepare 阶段）
-  │     └── BootstrapFlow.start(manager, config)
-  │           ├── CoreModule        → CoreModuleProvider
-  │           ├── StorageModule     → BanyanDB/ES/JDBC Provider
-  │           ├── ReceiverModule    → gRPC/Kafka Provider
-  │           ├── AnalyzerModule    → AgentAnalyzer Provider
-  │           ├── QueryModule       → GraphQL Provider
-  │           ├── AlarmModule       → Alarm Provider
-  │           └── ClusterModule     → ZK/K8s/Nacos Provider
-  │
-  ├── 4. 启动模块（start 阶段）
-  │     ├── 启动 gRPC 服务（端口 11800）
-  │     ├── 启动 HTTP 服务（端口 12800）
-  │     └── 启动定时任务
-  │
-  └── 5. 通知完成（notifyAfterCompleted）
+```mermaid
+graph TD
+    main["OAPServerBootstrap.main()"]
+
+    main --> step1["1. 加载 application.yml<br/>ApplicationConfigLoader.load()"]
+    main --> step2["2. 初始化 ModuleManager<br/>ModuleManager manager = new ModuleManager()"]
+    main --> step3["3. 初始化模块（prepare 阶段）<br/>BootstrapFlow.start(manager, config)"]
+    step3 --> m1["CoreModule → CoreModuleProvider"]
+    step3 --> m2["StorageModule → BanyanDB/ES/JDBC Provider"]
+    step3 --> m3["ReceiverModule → gRPC/Kafka Provider"]
+    step3 --> m4["AnalyzerModule → AgentAnalyzer Provider"]
+    step3 --> m5["QueryModule → GraphQL Provider"]
+    step3 --> m6["AlarmModule → Alarm Provider"]
+    step3 --> m7["ClusterModule → ZK/K8s/Nacos Provider"]
+    main --> step4["4. 启动模块（start 阶段）"]
+    step4 --> s41["启动 gRPC 服务（端口 11800）"]
+    step4 --> s42["启动 HTTP 服务（端口 12800）"]
+    step4 --> s43["启动定时任务"]
+    main --> step5["5. 通知完成（notifyAfterCompleted）"]
 ```
 
 #### 3.2 TraceAnalyzer：Segment 解析
@@ -223,76 +208,68 @@ public void doAnalysis(SegmentObject segmentObject) {
 
 #### 3.3 OAL 引擎执行
 
-```
 OAL 指标聚合流程：
 
-1. SourceReceiver 接收 Source 数据
-   └── SourceReceiverImpl.receive(Source source)
-
-2. 将 Source 数据分发到对应的 OAL 聚合实例
-   └── MetricsStreamProcessor.getInstance().in(source)
-
-3. 每个 OAL 聚合实例执行 combine()
-   └── 实时更新分钟级指标（L1 Metrics）
-
-4. Downsampling 定时任务
-   ├── 每分钟：L1 指标 → 写入存储
-   ├── 每小时：L1 指标 → 聚合为 L2 指标 → 写入存储
-   └── 每天：L2 指标 → 聚合为 L3 指标 → 写入存储
+```mermaid
+graph TD
+    s1["1. SourceReceiver 接收 Source 数据<br/>SourceReceiverImpl.receive(Source source)"]
+    s1 --> s2["2. 将 Source 数据分发到对应的 OAL 聚合实例<br/>MetricsStreamProcessor.getInstance().in(source)"]
+    s2 --> s3["3. 每个 OAL 聚合实例执行 combine()<br/>实时更新分钟级指标（L1 Metrics）"]
+    s3 --> s4["4. Downsampling 定时任务"]
+    s4 --> d1["每分钟：L1 指标 → 写入存储"]
+    s4 --> d2["每小时：L1 指标 → 聚合为 L2 指标 → 写入存储"]
+    s4 --> d3["每天：L2 指标 → 聚合为 L3 指标 → 写入存储"]
 ```
 
 ### 4. 端到端代码走读
 
 以下是一次 HTTP 请求（`GET /order/123`）的完整代码追踪：
 
-```
-1. 用户请求到达 order-service (Tomcat 端口 8080)
-   │
-2. Tomcat 插件拦截 → 创建 Entry Span
-   │  └── operationName: GET:/order/123
-   │  └── TracingContext 栈: [Entry Span]
-   │
-3. OrderController 调用 OrderService.findById()
-   │  └── 无插件拦截 → 不创建 Span
-   │
-4. OrderService 调用 UserService（通过 Feign HTTP 客户端）
-   │
-5. Feign 插件拦截 → 创建 Exit Span
-   │  ├── operationName: GET:/user/123
-   │  ├── peer: user-service:8080
-   │  ├── 创建 ContextCarrier
-   │  ├── 注入 sw8 Header 到 HTTP 请求
-   │  └── TracingContext 栈: [Entry Span, Exit Span]
-   │
-6. 发送 HTTP 请求到 user-service
-   │
-   [user-service 端]
-7. Tomcat 插件拦截 → 提取 sw8 Header → 创建 Entry Span
-   │  └── 关联到同一个 Trace
-   │
-8. UserService 返回响应
-   │
-9. Feign Exit Span 完成 → stopSpan()
-   │  └── TracingContext 栈: [Entry Span]
-   │
-10. OrderController 返回响应
-    │
-11. Tomcat Entry Span 完成 → stopSpan()
-    │  └── TracingContext 栈: [] → Segment 完成
-    │
-12. Segment 序列化 → 放入 TraceBuffer
-    │
-13. 异步 gRPC 上报到 OAP
-    │
-14. OAP 端：
-    ├── gRPC 接收 → 放入 DataCarrier
-    ├── Analyzer 消费 → TraceAnalyzer.doAnalysis()
-    │   ├── FirstAnalysisListener → 提取 Endpoint 元数据
-    │   ├── EntryAnalysisListener → 生成 Service/Endpoint Source
-    │   └── ExitAnalysisListener → 生成 ServiceRelation Source
-    ├── OAL 引擎 → 聚合指标
-    ├── 指标写入存储
-    └── UI 查询 → GraphQL → 展示
+```mermaid
+graph TB
+    subgraph order_side["order-service 端"]
+        s1["1. 用户请求到达 order-service（Tomcat 端口 8080）"]
+        s2["2. Tomcat 插件拦截 → 创建 Entry Span<br/>operationName: GET:/order/123<br/>TracingContext 栈: [Entry Span]"]
+        s3["3. OrderController 调用 OrderService.findById()<br/>无插件拦截 → 不创建 Span"]
+        s4["4. OrderService 调用 UserService（通过 Feign HTTP 客户端）"]
+        s5["5. Feign 插件拦截 → 创建 Exit Span<br/>operationName: GET:/user/123 ｜ peer: user-service:8080<br/>创建 ContextCarrier<br/>注入 sw8 Header 到 HTTP 请求<br/>TracingContext 栈: [Entry Span, Exit Span]"]
+        s9["9. Feign Exit Span 完成 → stopSpan()<br/>TracingContext 栈: [Entry Span]"]
+        s10["10. OrderController 返回响应"]
+        s11["11. Tomcat Entry Span 完成 → stopSpan()<br/>TracingContext 栈: [] → Segment 完成"]
+        s12["12. Segment 序列化 → 放入 TraceBuffer"]
+        s13["13. 异步 gRPC 上报到 OAP"]
+        s1 --> s2 --> s3 --> s4 --> s5
+        s9 --> s10 --> s11 --> s12 --> s13
+    end
+
+    subgraph user_side["user-service 端"]
+        s7["7. Tomcat 插件拦截 → 提取 sw8 Header → 创建 Entry Span<br/>关联到同一个 Trace"]
+        s8["8. UserService 返回响应"]
+        s7 --> s8
+    end
+
+    subgraph oap_side["14. OAP 端"]
+        o1["gRPC 接收 → 放入 DataCarrier"]
+        o2["Analyzer 消费 → TraceAnalyzer.doAnalysis()"]
+        o2a["FirstAnalysisListener → 提取 Endpoint 元数据"]
+        o2b["EntryAnalysisListener → 生成 Service/Endpoint Source"]
+        o2c["ExitAnalysisListener → 生成 ServiceRelation Source"]
+        o3["OAL 引擎 → 聚合指标"]
+        o4["指标写入存储"]
+        o5["UI 查询 → GraphQL → 展示"]
+        o1 --> o2
+        o2 --> o2a
+        o2 --> o2b
+        o2 --> o2c
+        o2a --> o3
+        o2b --> o3
+        o2c --> o3
+        o3 --> o4 --> o5
+    end
+
+    s5 -- "6. 发送 HTTP 请求到 user-service" --> s7
+    s8 -- "响应返回" --> s9
+    s13 --> o1
 ```
 
 ---

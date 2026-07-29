@@ -305,7 +305,7 @@ graph TD
 
 ```mermaid
 graph LR
-    subgraph 写放大组成
+    subgraph write_amp["写放大组成"]
         direction TB
         S1["_source (1x)"]
         S2["倒排 (2~4x，每个索引字段各一份)"]

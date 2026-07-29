@@ -15,14 +15,14 @@
 
 ```mermaid
 graph LR
-    subgraph 正排索引
+    subgraph forward_index["正排索引"]
         doc1["doc1"] --> hello1["hello"]
         doc1 --> world1["world"]
         doc2["doc2"] --> hello2["hello"]
         doc2 --> es1["es"]
     end
 
-    subgraph 倒排索引
+    subgraph inverted_index["倒排索引"]
         hello3["hello"] --> doc_a["doc1, doc2"]
         world3["world"] --> doc_b["doc1"]
         es3["es"] --> doc_c["doc2"]
@@ -216,7 +216,7 @@ ES 的一次搜索分两阶段：
 
 ```mermaid
 graph TD
-    subgraph Query阶段["Query 阶段"]
+    subgraph query_phase["Query 阶段"]
         direction TB
         Q1["coordinating 节点收到请求"]
         Q2["路由到每个相关分片（primary 或 replica 之一）"]
@@ -225,7 +225,7 @@ graph TD
         Q1 --> Q2 --> Q3 --> Q4
     end
 
-    subgraph Fetch阶段["Fetch 阶段"]
+    subgraph fetch_phase["Fetch 阶段"]
         direction TB
         F1["coordinating 节点按 docId 去对应分片"]
         F2["取出 _source（完整文档）"]

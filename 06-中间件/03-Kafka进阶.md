@@ -14,17 +14,18 @@
 
 **选举机制：抢临时节点（抢座位）**
 
-```
-        ZooKeeper
-   ┌──────────────────┐
-   │  /controller      │  ← 临时节点，谁先创建成功谁就是 Controller
-   └──────────────────┘            ▲
-            ▲ 创建成功              │ 监听(其余Broker都盯着)
-            │                       │
-   ┌────────┴───┐   ┌──────────┐   ┌──────────┐
-   │ Broker-1   │   │ Broker-2  │   │ Broker-3  │
-   │ =Controller│   │ 抢失败    │   │ 抢失败    │
-   └────────────┘   └──────────┘   └──────────┘
+```mermaid
+graph TB
+    subgraph ZK["ZooKeeper"]
+        ZNode["/controller<br/>临时节点，谁先创建成功谁就是 Controller"]
+    end
+    B1["Broker-1<br/>= Controller"]
+    B2["Broker-2<br/>抢失败"]
+    B3["Broker-3<br/>抢失败"]
+
+    B1 -->|创建成功| ZNode
+    B2 -.->|监听（其余 Broker 都盯着）| ZNode
+    B3 -.->|监听（其余 Broker 都盯着）| ZNode
 ```
 
 - 每个 Broker 启动时都去 ZK 创建临时节点 `/controller`，ZK 节点不可重复，**只有一个能创建成功** → 它就是 Controller。
@@ -35,10 +36,14 @@
 
 抢座位机制有个隐患：Controller 其实没宕机，只是**网络抖动**导致它与 ZK 的会话超时，ZK 删了 `/controller` → 集群选出新 Controller。这时老 Controller 网络恢复，以为自己还在位 → 出现**两个 Controller 同时发号施令**，其他 Broker 不知道听谁的，这就是**脑裂**。
 
-```
-老Controller(以为自己还在) ──┐
-                            ├──> 其他Broker懵了
-新Controller(刚选出)     ──┘
+```mermaid
+graph LR
+    Old["老 Controller<br/>（以为自己还在）"]
+    New["新 Controller<br/>（刚选出）"]
+    Others["其他 Broker 懵了"]
+
+    Old --> Others
+    New --> Others
 ```
 
 - Kafka 用 **Controller Epoch（任期/纪元）** 解决：每次 Controller 换届，epoch 自动 +1。
@@ -80,20 +85,15 @@ Controller 在 `/brokers/ids` 路径上注册监听器（Watch）：
 
 参考资料只说了"Controller 会进行相应处理"，但没讲处理什么。实际最关键的是：
 
-```
-Broker-2 宕机
-   │
-   ▼
-Controller 感知到 /brokers/ids/2 消失
-   │
-   ▼
-找出"Leader 在 Broker-2 上"的所有分区
-   │
-   ▼
-对每个分区，从 ISR(同步副本) 列表里挑一个存活的副本 → 设为新 Leader
-   │  (若 ISR 全空，可在 unclean.leader.election.enable=true 时冒险从 OSR 选 → 可能丢数据)
-   ▼
-向集群所有 Broker 广播新的元数据 → 消费者/生产者更新分区路由
+```mermaid
+flowchart TD
+    S1["Broker-2 宕机"]
+    S2["Controller 感知到 /brokers/ids/2 消失"]
+    S3["找出 Leader 在 Broker-2 上的所有分区"]
+    S4["对每个分区，从 ISR（同步副本）列表里挑一个存活的副本 → 设为新 Leader<br/>（若 ISR 全空，可在 unclean.leader.election.enable=true 时冒险从 OSR 选 → 可能丢数据）"]
+    S5["向集群所有 Broker 广播新的元数据 → 消费者/生产者更新分区路由"]
+
+    S1 --> S2 --> S3 --> S4 --> S5
 ```
 
 - 这就是 Broker 宕机后系统能"自愈"的核心。如果 ISR 里没有可用副本，且没开 `unclean.leader.election`，分区就不可用（宁可不可用也不丢数据）。
@@ -108,14 +108,24 @@ Controller 感知到 /brokers/ids/2 消失
 - 分区是**逻辑**工作单元（保证分区内有序），但不是存储单元。
 - 每个分区在磁盘上是一个目录，目录里是一组 **Segment（日志段）** 文件，每个 Segment 含三个文件：
 
-```
-某分区目录/                        （文件名 = 该Segment起始offset，20位补0）
-  00000000000000000000.log        实际数据
-  00000000000000000000.index      偏移量索引（offset -> 物理位置）
-  00000000000000000000.timeindex  时间戳索引（timestamp -> offset）
-  00000000000000000015.log        下一段，起始offset=15
-  00000000000000000015.index
-  00000000000000000015.timeindex
+```mermaid
+graph TD
+    Dir["某分区目录/<br/>（文件名 = 该 Segment 起始 offset，20 位补 0）"]
+
+    subgraph Seg0["Segment 0（起始 offset = 0）"]
+        L0["00000000000000000000.log<br/>实际数据"]
+        I0["00000000000000000000.index<br/>偏移量索引（offset → 物理位置）"]
+        T0["00000000000000000000.timeindex<br/>时间戳索引（timestamp → offset）"]
+    end
+
+    subgraph Seg15["Segment 15（下一段，起始 offset = 15）"]
+        L15["00000000000000000015.log"]
+        I15["00000000000000000015.index"]
+        T15["00000000000000000015.timeindex"]
+    end
+
+    Dir --> Seg0
+    Dir --> Seg15
 ```
 
 - 只有**最新的那个 Segment** 可写（活跃段），其他都是只读。
@@ -129,18 +139,13 @@ Controller 感知到 /brokers/ids/2 消失
 
 假设消费者要读 `offset = 18` 的消息：
 
-```
-1. 跳跃表选 Segment
-   ConcurrentSkipListMap(key=各Segment的起始offset)
-        │ 二分/跳跃查找：找 <= 18 的最大起始offset → 命中 00000000000000000015 段
-        ▼
-2. 二分查 .index
-   在 00000000000000000015.index 里二分查找
-   找 <= (18-15)=3 的最大相对offset → 得到一个 position（物理偏移）
-        ▼
-3. 顺序扫描 .log
-   从 position 开始，在 .log 文件里**顺序往后读**，
-   逐条比对，直到找到 offset=18 的那条
+```mermaid
+flowchart TD
+    S1["1. 跳跃表选 Segment<br/>ConcurrentSkipListMap（key = 各 Segment 的起始 offset）<br/>二分/跳跃查找：找 <= 18 的最大起始 offset → 命中 00000000000000000015 段"]
+    S2["2. 二分查 .index<br/>在 00000000000000000015.index 里二分查找<br/>找 <=（18-15）= 3 的最大相对 offset → 得到一个 position（物理偏移）"]
+    S3["3. 顺序扫描 .log<br/>从 position 开始，在 .log 文件里顺序往后读<br/>逐条比对，直到找到 offset=18 的那条"]
+
+    S1 --> S2 --> S3
 ```
 
 - 第1步用**跳跃表**（内存中，快）选 Segment；第2步用**二分查找**（索引文件，因为稀疏所以项不多）；第3步**顺序读**（磁盘顺序读极快，且命中 PageCache 更快）。
@@ -202,14 +207,26 @@ bin/kafka-topics.sh --delete --topic test --bootstrap-server broker:9092
 - 思路：对于**相同 Key** 的消息，**只保留最后一条**（最新值），把旧的同类消息清掉。
 - 适合场景：用 Kafka 存"状态快照"而非"事件流"，如存用户最新状态、配置变更。
 
-```
-压缩前(按时间)：       压缩后(同key只留最新)：
-  K1=V1                   K1=V3   (留最后)
-  K2=V1                   K2=V2
-  K1=V2                   K3=V1
-  K1=V3
-  K2=V2
-  K3=V1
+```mermaid
+graph LR
+    subgraph Before["压缩前（按时间）"]
+        B1["K1=V1"]
+        B2["K2=V1"]
+        B3["K1=V2"]
+        B4["K1=V3"]
+        B5["K2=V2"]
+        B6["K3=V1"]
+        B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    end
+
+    subgraph After["压缩后（同 key 只留最新）"]
+        A1["K1=V3（留最后）"]
+        A2["K2=V2"]
+        A3["K3=V1"]
+        A1 --> A2 --> A3
+    end
+
+    Before -->|compact 压缩| After
 ```
 
 ⚠️ **墓碑机制（Tombstone，遗漏）**：如何删除 compact 主题里某个 Key？
@@ -232,10 +249,12 @@ bin/kafka-topics.sh --delete --topic test --bootstrap-server broker:9092
 
 **Kafka 怎么用页缓存**
 
-```
-生产者 ──> Broker ──> 写到 Page Cache（脏页）──> OS 异步刷盘
-                       ▲
-                       └── 消费者读时直接命中 Page Cache，无需走磁盘
+```mermaid
+graph LR
+    P["生产者"] --> B["Broker"]
+    B --> PC["写到 Page Cache（脏页）"]
+    PC --> OS["OS 异步刷盘"]
+    C["消费者读时直接命中 Page Cache，无需走磁盘"] -.-> PC
 ```
 
 - Kafka **大量依赖页缓存**，这是它高吞吐的基石之一——消息先落页缓存，刷盘交给 OS 调度，消费时大概率直接命中缓存。
@@ -253,18 +272,24 @@ bin/kafka-topics.sh --delete --topic test --bootstrap-server broker:9092
 
 **传统 IO（读磁盘 + 发网络）= 4 次拷贝 + 4 次切换**
 
-```
-磁盘 ─DMA─> 内核读缓冲 ─CPU拷贝─> 用户缓冲(Java) ─CPU拷贝─> 内核socket缓冲 ─DMA─> 网卡
-          [1]                [2]                 [3]              [4]
-   用户态←──切换──→用户态←──切换──→用户态←──切换──→用户态←──切换
+```mermaid
+graph LR
+    Disk["磁盘"] -->|"DMA ①"| KR["内核读缓冲"]
+    KR -->|"CPU 拷贝 ②"| UB["用户缓冲（Java）"]
+    UB -->|"CPU 拷贝 ③"| SK["内核 socket 缓冲"]
+    SK -->|"DMA ④"| NIC["网卡"]
+    Note["4 次拷贝 + 4 次用户态/内核态切换"]
+    KR -.- Note
 ```
 
 **sendfile 零拷贝 = 2 次拷贝（数据不进用户空间）+ 2 次切换**
 
-```
-磁盘 ─DMA─> 内核读缓冲 ─DMA─> 网卡      (数据全程在内核空间，CPU不参与拷贝)
-          [1]            [2]
-   用户态←──切换──→用户态←──切换
+```mermaid
+graph LR
+    Disk["磁盘"] -->|"DMA ①"| KR["内核读缓冲"]
+    KR -->|"DMA ②"| NIC["网卡"]
+    Note["数据全程在内核空间，CPU 不参与拷贝<br/>2 次拷贝 + 2 次用户态/内核态切换"]
+    KR -.- Note
 ```
 
 - Kafka **消费者拉取数据** 和 **Follower 同步数据** 都用 `sendfile`（Java 的 `FileChannel.transferTo` 底层就是 sendfile）：数据直接从页缓存经内核传到网卡，**完全不进 Java 应用内存**。

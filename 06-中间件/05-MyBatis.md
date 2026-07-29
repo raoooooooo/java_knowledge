@@ -159,41 +159,22 @@ jdbc:mysql://host/db?rewriteBatchedStatements=true
 
 #### 2.4 一次查询的完整执行流程（时序图）⭐⭐⭐
 
-```
-应用代码              MapperProxy           SqlSession            Executor
-   │  userMapper         │                    │                     │
-   │  .selectById(1L)    │                    │                     │
-   ├────────────────────>│                    │                     │
-   │                     │ invoke()           │                     │
-   │                     │ (找 MappedStatement: namespace+id)        │
-   │                     ├───────────────────>│                     │
-   │                     │                    │ selectOne(id,param)│
-   │                     │                    ├────────────────────>│
-   │                     │                    │                     │ query()
-   │                     │                    │                     │
-   │                     │                    │                     │ ① 先查缓存
-   │                     │                    │                     │   一级缓存命中 -> 直接返回
-   │                     │                    │                     │   二级缓存命中 -> 直接返回（需先获锁）
-   │                     │                    │                     │
-   │                     │                    │                     │ ② 未命中，走 DB
-   │                     │                    │                     │   ↓
-   │                     │                    │                     │ StatementHandler.prepare()
-   │                     │                    │                     │   (创建 PreparedStatement，被插件代理)
-   │                     │                    │                     │ StatementHandler.parameterize()
-   │                     │                    │                     │   -> ParameterHandler.setParameters()
-   │                     │                    │                     │   (把 #{id} 填成 ? 对应的值)
-   │                     │                    │                     │ StatementHandler.query()
-   │                     │                    │                     │   -> ps.execute()
-   │                     │                    │                     │   -> ResultSetHandler.handleResultSets()
-   │                     │                    │                     │   (ResultSet 行 -> Java 对象)
-   │                     │                    │                     │
-   │                     │                    │                     │ ③ 写入缓存
-   │                     │                    │                     │   (一级缓存写入；SqlSession close/commit 时写入二级缓存)
-   │                     │                    │                     │
-   │                     │                    │<────────────────────┤  返回结果
-   │                     │<───────────────────┤
-   │<────────────────────┤  返回 User 对象
-   │ User{id=1, name=...}│
+```mermaid
+sequenceDiagram
+    participant App as 应用代码
+    participant MP as MapperProxy
+    participant SS as SqlSession
+    participant EX as Executor
+
+    App->>MP: userMapper.selectById(1L)
+    MP->>SS: invoke()<br/>（找 MappedStatement: namespace+id）
+    SS->>EX: selectOne(id, param)
+    EX->>EX: query() ① 先查缓存<br/>一级缓存命中 → 直接返回<br/>二级缓存命中 → 直接返回（需先获锁）
+    EX->>EX: ② 未命中，走 DB<br/>StatementHandler.prepare()（创建 PreparedStatement，被插件代理）<br/>StatementHandler.parameterize() → ParameterHandler.setParameters()（把 #｛id｝ 填成 ? 对应的值）<br/>StatementHandler.query() → ps.execute()<br/>→ ResultSetHandler.handleResultSets()（ResultSet 行 → Java 对象）
+    EX->>EX: ③ 写入缓存<br/>（一级缓存写入；SqlSession close/commit 时写入二级缓存）
+    EX-->>SS: 返回结果
+    SS-->>MP: 返回结果
+    MP-->>App: 返回 User 对象 User｛id=1, name=...｝
 ```
 
 **关键点提炼**：
@@ -844,22 +825,30 @@ public class InterceptorChain {
 
 #### 7.7 PageHelper 原理简述
 
-```
-   PageHelper.startPage(1, 10)
-      │
-      ▼ ThreadLocal 存入分页参数
-   userMapper.selectList()
-      │
-      ▼ 进入 Executor.query 被拦截
-   PageInterceptor.intercept()
-      │
-      ├─ ① 把原始 SQL 改写为 COUNT(*) 查询，统计总数
-      ├─ ② 把原始 SQL 追加 LIMIT 0, 10
-      ├─ ③ 执行改写后的 SQL
-      └─ ④ 用 PageInfo 包装结果（含总数、总页数）
-      │
-      ▼ ThreadLocal 清除（finally 必须清，防泄漏）
-   返回 PageInfo
+```mermaid
+flowchart TD
+    S1["PageHelper.startPage(1, 10)"]
+    S2["ThreadLocal 存入分页参数"]
+    S3["userMapper.selectList()"]
+    S4["进入 Executor.query 被拦截"]
+    S5["PageInterceptor.intercept()"]
+    D1["① 把原始 SQL 改写为 COUNT(*) 查询，统计总数"]
+    D2["② 把原始 SQL 追加 LIMIT 0, 10"]
+    D3["③ 执行改写后的 SQL"]
+    D4["④ 用 PageInfo 包装结果（含总数、总页数）"]
+    S6["ThreadLocal 清除（finally 必须清，防泄漏）"]
+    S7["返回 PageInfo"]
+
+    S1 --> S2 --> S3 --> S4 --> S5
+    S5 --> D1
+    S5 --> D2
+    S5 --> D3
+    S5 --> D4
+    D1 --> S6
+    D2 --> S6
+    D3 --> S6
+    D4 --> S6
+    S6 --> S7
 ```
 
 > ⚠️ **PageHelper 的坑**：`startPage` 用 ThreadLocal 传参，**必须紧跟一个 Mapper 查询**才会被消费。如果中间隔了别的代码（比如先查了 Redis 再查 DB），ThreadLocal 可能没被消费，下一次查询被错误地分页。MyBatis-Plus 的 `Page<T>` 显式传参对象更安全。
@@ -883,21 +872,25 @@ public class InterceptorChain {
 
 `DefaultSqlSession` 是**非线程安全**的，多个线程共用会出问题。`SqlSessionTemplate` 通过 **动态代理 + ThreadLocal** 解决：
 
-```
-   多个 Service Bean
-        │
-        ▼ @Autowired 注入
-   SqlSessionTemplate（单例，所有线程共用）
-        │
-        ▼ 每次方法调用
-   SqlSessionUtils.getSqlSession(sqlSessionFactory)
-        │
-        ▼ 事务同步管理器 TransactionSynchronizationManager
-   ① 有事务：复用事务绑定的 SqlSession（线程内复用）
-   ② 无事务：新建一个 SqlSession，用完立即关闭
-        │
-        ▼ 委托执行 SQL
-   真正的 SqlSession（DefaultSqlSession）
+```mermaid
+flowchart TD
+    S1["多个 Service Bean"]
+    S2["@Autowired 注入"]
+    S3["SqlSessionTemplate（单例，所有线程共用）"]
+    S4["每次方法调用"]
+    S5["SqlSessionUtils.getSqlSession(sqlSessionFactory)"]
+    S6["事务同步管理器 TransactionSynchronizationManager"]
+    B1["① 有事务：复用事务绑定的 SqlSession（线程内复用）"]
+    B2["② 无事务：新建一个 SqlSession，用完立即关闭"]
+    S7["委托执行 SQL"]
+    S8["真正的 SqlSession（DefaultSqlSession）"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
+    S6 --> B1
+    S6 --> B2
+    B1 --> S7
+    B2 --> S7
+    S7 --> S8
 ```
 
 **关键点**：`SqlSessionTemplate` 自身是个代理，每次调用都会从 `SqlSessionUtils` 获取当前线程对应的真实 `SqlSession`，**Spring 事务开启时复用、否则新建即关**。这也是为什么一级缓存"几乎失效"——非事务场景下每次都是新的 SqlSession。
@@ -1010,24 +1003,21 @@ userMapper.selectPage(page, null);   // 自动分页，结果写入 page
 
 #### 9.3 PageHelper 的工作机制
 
-```
-   代码：PageHelper.startPage(1, 10)
-              │
-              ▼
-   ThreadLocal<Page> 设置分页参数
-              │
-              ▼
-   userMapper.selectAll()
-              │
-              ▼ 进入 Executor.query
-              │ 被 PageInterceptor 拦截
-              │
-              ├─ ① 从 ThreadLocal 取出分页参数
-              ├─ ② 生成 count SQL：SELECT COUNT(*) FROM (原 SQL)
-              ├─ ③ 改写原 SQL：SELECT * FROM user LIMIT 0, 10
-              ├─ ④ 执行 count 与查询 SQL
-              ├─ ⑤ 用 Page 包装结果（含总数）
-              └─ ⑥ ThreadLocal.remove()   ← finally 必须清！
+```mermaid
+flowchart TD
+    S1["代码：PageHelper.startPage(1, 10)"]
+    S2["ThreadLocal&lt;Page&gt; 设置分页参数"]
+    S3["userMapper.selectAll()"]
+    S4["进入 Executor.query<br/>被 PageInterceptor 拦截"]
+    D1["① 从 ThreadLocal 取出分页参数"]
+    D2["② 生成 count SQL：SELECT COUNT(*) FROM （原 SQL）"]
+    D3["③ 改写原 SQL：SELECT * FROM user LIMIT 0, 10"]
+    D4["④ 执行 count 与查询 SQL"]
+    D5["⑤ 用 Page 包装结果（含总数）"]
+    D6["⑥ ThreadLocal.remove() ← finally 必须清！"]
+
+    S1 --> S2 --> S3 --> S4
+    S4 --> D1 --> D2 --> D3 --> D4 --> D5 --> D6
 ```
 
 **两个常踩的坑**：

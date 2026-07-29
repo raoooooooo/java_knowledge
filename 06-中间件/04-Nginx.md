@@ -55,12 +55,24 @@
 
 **2. master-worker 架构**
 
-```
-            master（管理者：读配置、管worker、不接请求）
-           ┌────────┼────────┐
-        worker    worker    worker   （干活的，真正处理请求）
-          │          │          │
-        epoll      epoll      epoll    每个worker扛上万连接
+```mermaid
+graph TB
+    M["master（管理者：读配置、管 worker、不接请求）"]
+    W1["worker"]
+    W2["worker"]
+    W3["worker"]
+    E1["epoll"]
+    E2["epoll"]
+    E3["epoll"]
+    Note["worker 是干活的，真正处理请求<br/>每个 worker 扛上万连接"]
+
+    M --> W1
+    M --> W2
+    M --> W3
+    W1 --> E1
+    W2 --> E2
+    W3 --> E3
+    W2 -.- Note
 ```
 
 - master 不接请求，只负责管理、读配置、重启。
@@ -235,11 +247,18 @@ upstream backend {
 
 问题出在多台 Tomcat 各存各的（默认轮询）：
 
-```
-                    Nginx(轮询)
-                   /     |     \
-              Tomcat1  Tomcat2  Tomcat3
-              各自内存Session，互不相通！
+```mermaid
+graph TB
+    N["Nginx（轮询）"]
+    T1["Tomcat1"]
+    T2["Tomcat2"]
+    T3["Tomcat3"]
+    Note["各自内存 Session，互不相通！"]
+
+    N --> T1
+    N --> T2
+    N --> T3
+    T2 -.- Note
 ```
 
 翻车场景：
@@ -303,10 +322,11 @@ http {          # HTTP 服务器配置
 
 ### 1.7 动静分离（典型架构）
 
-```
-浏览器 ──> Nginx
-            ├─ /static/**  ──> 本地磁盘文件（图片/js/css）  ← 静态，Nginx自己处理
-            └─ /api/**     ──> Tomcat 集群                  ← 动态，转后端
+```mermaid
+graph LR
+    Br["浏览器"] --> N["Nginx"]
+    N -->|"/static/**"| Static["本地磁盘文件（图片/js/css）<br/>← 静态，Nginx 自己处理"]
+    N -->|"/api/**"| Tom["Tomcat 集群<br/>← 动态，转后端"]
 ```
 
 - **好处**：静态资源由 Nginx 直接返回（它擅长干这个，快），Tomcat 只处理动态业务，减轻后端压力。

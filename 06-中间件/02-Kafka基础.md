@@ -453,9 +453,15 @@ flowchart TD
 
 幂等性靠 `PID + SequenceNum` 去重。问题在于：**PID 是 Producer 启动时由 Broker 临时分配的，每次重启都变**。
 
-```
-第一次运行:  Producer-A (PID=100)  发了 msg1, msg2, msg3
-程序重启:    Producer-B (PID=200)  ← PID 变了！Broker 不认识它了
+```mermaid
+graph LR
+    subgraph S1["第一次运行 — 会话1"]
+        PA["Producer-A（PID=100）<br/>发了 msg1, msg2, msg3"]
+    end
+    subgraph S2["程序重启 — 会话2"]
+        PB["Producer-B（PID=200）<br/>PID 变了！Broker 不认识它了"]
+    end
+    S1 -.->|重启| S2
 ```
 
 - 重启后 PID 变了，Broker 端的"已提交序列号"记录是按 PID 存的，**新 PID 查不到旧记录**
@@ -480,12 +486,20 @@ flowchart TD
 
 事务不仅能解决跨会话，更核心的价值是：**让多条发往不同分区的消息，要么全成功，要么全失败**（原子写入）。
 
-```
-场景：电商下单，要同时往 3 个 topic 发消息
-  -> topic-order (订单)       消息A
-  -> topic-inventory (扣库存)  消息B
-  -> topic-notify (通知)       消息C
-要求：A、B、C 要么全发成功，要么全不发（不能订单成功但库存没扣）
+```mermaid
+graph LR
+    P["电商下单 Producer"]
+    A["topic-order（订单）<br/>消息A"]
+    B["topic-inventory（扣库存）<br/>消息B"]
+    C["topic-notify（通知）<br/>消息C"]
+    REQ["要求：A、B、C 要么全发成功，要么全不发<br/>（不能订单成功但库存没扣）"]
+
+    P --> A
+    P --> B
+    P --> C
+    A --- REQ
+    B --- REQ
+    C --- REQ
 ```
 
 - 开启事务后，Producer 把 A、B、C 先写入各自分区（但此时消费者**看不到**，叫"未提交"状态）
@@ -570,15 +584,21 @@ timeline
 > - **第二阶段（执行）**：全员 YES -> 服务员喊"结账AA"，4 人各自掏钱；有任一 NO -> 服务员喊"散了散了"，谁都不掏。
 
 **两阶段流程**
-```
-阶段一  Prepare（准备/投票）
-  协调者 -> 所有参与者: "准备好了吗？"
-  各参与者: 执行操作(写日志/加锁)但先不真正提交，回复 YES 或 NO
-  协调者: 收集所有投票
+```mermaid
+flowchart TD
+    subgraph P1["阶段一 Prepare（准备/投票）"]
+        C1["协调者 → 所有参与者：准备好了吗？"]
+        C2["各参与者：执行操作（写日志/加锁）但先不真正提交，回复 YES 或 NO"]
+        C3["协调者：收集所有投票"]
+        C1 --> C2 --> C3
+    end
 
-阶段二  Commit / Rollback（提交/回滚）
-  全员 YES  -> 协调者发 Commit，各参与者正式提交
-  有任一 NO -> 协调者发 Rollback，全部回滚
+    subgraph P2["阶段二 Commit / Rollback（提交/回滚）"]
+        D1["全员 YES → 协调者发 Commit，各参与者正式提交"]
+        D2["有任一 NO → 协调者发 Rollback，全部回滚"]
+    end
+
+    P1 --> P2
 ```
 
 **2PC 的致命缺点**
@@ -692,10 +712,17 @@ graph LR
 ### 1.4 存储消息
 
 **存储组件链路**
-```
-KafkaApis(请求路由) → ReplicaManager(副本管理/ACK校验)
-  → Partition(分区校验) → UnifiedLog(日志管理)
-  → LocalLog(本地日志) → LogSegment(文件段,FileChannel写)
+
+```mermaid
+graph LR
+    K["KafkaApis<br/>请求路由"]
+    R["ReplicaManager<br/>副本管理/ACK校验"]
+    P["Partition<br/>分区校验"]
+    U["UnifiedLog<br/>日志管理"]
+    L["LocalLog<br/>本地日志"]
+    S["LogSegment<br/>文件段（FileChannel 写）"]
+
+    K --> R --> P --> U --> L --> S
 ```
 
 **数据存储流程（7步校验）**
@@ -922,13 +949,15 @@ graph LR
 
 单纯靠 HW 截断在某些故障下会丢数据：
 
-```
-场景：Follower 重启 + Leader 切换
-1. Leader A (LEO=2, HW=1)，Follower B (LEO=1, HW=1)
-2. B 重启，A 宕机，B 被选为新 Leader
-3. B 把自己日志截断到 HW=1，然后接收新写入，LEO 推到 2
-4. 原 Leader A 恢复成 Follower，按 HW=1 截断日志 -> 删掉了 offset=1 的消息
-5. 结果：offset=1 的消息 永久丢失
+```mermaid
+flowchart TD
+    S1["1. Leader A（LEO=2, HW=1）<br/>Follower B（LEO=1, HW=1）"]
+    S2["2. B 重启，A 宕机<br/>B 被选为新 Leader"]
+    S3["3. B 把自己日志截断到 HW=1<br/>然后接收新写入，LEO 推到 2"]
+    S4["4. 原 Leader A 恢复成 Follower<br/>按 HW=1 截断日志 → 删掉了 offset=1 的消息"]
+    S5["5. 结果：offset=1 的消息永久丢失"]
+
+    S1 --> S2 --> S3 --> S4 --> S5
 ```
 
 **Leader Epoch 解决**：引入 `<LeaderEpoch, StartOffset>` 日志，每次 Leader 切换递增 Epoch。Follower 重启时不再盲目截断到 HW，而是先问 Leader 当前的 Leader Epoch，据此**精确截断**，避免误删已提交消息。
@@ -1200,17 +1229,24 @@ while (true) {
 
 **两者如何配合（端到端 Exactly Once）**
 
-```text
-  生产者事务(1.3节)                 消费者事务(本节)
-       │                                  │
-       ▼                                  ▼
-  开事务发多条消息               开事务：消费 + 提交offset 原子绑定
-  (未提交时消费者看不到)                    │
-       │                                  ▼
-       ▼                            read_committed: 只读已提交消息
-  commit: 发Marker让消息可见                 │
-                                          ▼
-                                   端到端 Exactly Once: 消息不丢不重
+```mermaid
+graph TB
+    subgraph PT["生产者事务（1.3节）"]
+        P1["开事务发多条消息<br/>（未提交时消费者看不到）"]
+        P2["commit：发 Marker 让消息可见"]
+        P1 --> P2
+    end
+
+    subgraph CT["消费者事务（本节）"]
+        C1["开事务：消费 + 提交 offset 原子绑定"]
+        C2["read_committed：只读已提交消息"]
+        C1 --> C2
+    end
+
+    EOS["端到端 Exactly Once：消息不丢不重"]
+
+    PT --> CT
+    CT --> EOS
 ```
 
 > 💡 **一句话**：生产者事务保证"发出去的消息要么全可见要么全不可见"，消费者事务保证"读到的消息处理与提交offset原子绑定"。两者配合 + 隔离级别 `read_committed`，才能实现端到端的 Exactly Once。
@@ -1222,33 +1258,22 @@ while (true) {
 
 **完整流程图**
 
-```text
-  消费者 Consumer                          Broker
-      │                                      │
-      │  1. 发送 FETCH 请求                   │
-      │  (带: 要消费的分区、当前offset、拉多少)│
-      ├─────────────────────────────────────►│
-      │                                      │
-      │              2. KafkaApis 路由         │
-      │                 (按请求标记FETCH分发)    │
-      │                                      │
-      │              3. ReplicaManager 处理    │
-      │                 - 确定拉取的分区        │
-      │                 - 校验权限/合法性       │
-      │                                      │
-      │              4. 判定"首选副本"        │
-      │                 (读Leader还是Follower)  │
-      │                                      │
-      │              5. LogSegment 读取数据    │
-      │                 - 按offset定位日志段     │
-      │                 - 用索引快速查找        │
-      │                                      │
-      │              6. 零拷贝传输              │
-      │                 (FileChannel从内核直传)  │
-      │                                      │
-      │  ◄─── 返回消息批次 + HW/LEO ──────────┤
-      │                                      │
-  消费者收到数据，处理后再poll下一次
+```mermaid
+sequenceDiagram
+    participant C as 消费者 Consumer
+    participant B as Broker
+    participant K as KafkaApis
+    participant R as ReplicaManager
+    participant L as LogSegment
+
+    C->>B: 1. 发送 FETCH 请求<br/>（带：要消费的分区、当前 offset、拉多少）
+    B->>K: 2. KafkaApis 路由<br/>（按请求标记 FETCH 分发）
+    K->>R: 3. ReplicaManager 处理
+    R->>R: 确定拉取的分区<br/>校验权限/合法性
+    R->>R: 4. 判定首选副本<br/>（读 Leader 还是 Follower）
+    R->>L: 5. LogSegment 读取数据<br/>按 offset 定位日志段，用索引快速查找
+    L-->>C: 6. 零拷贝传输<br/>（FileChannel 从内核直传）
+    Note over C: 返回消息批次 + HW/LEO<br/>消费者收到数据，处理后再 poll 下一次
 ```
 
 **分步详解**

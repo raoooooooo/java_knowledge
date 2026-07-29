@@ -11,7 +11,7 @@
 
 ```mermaid
 graph TB
-    subgraph LLM的两种记忆
+    subgraph llm_memories["LLM的两种记忆"]
         PM["🧠 参数记忆<br/>(Parametric Memory)"]
         AM["⚡ 激活记忆<br/>(Activation Memory)"]
     end
@@ -57,14 +57,14 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph 输入序列
+    subgraph input_seq["输入序列"]
         I1[我]
         I2[喜欢]
         I3[吃]
         I4[苹果]
     end
 
-    subgraph Q K V 投影
+    subgraph qkv_proj["Q K V 投影"]
         Q4[Q4 苹果的Query]
         K1[K1 我的Key]
         K2[K2 喜欢的Key]
@@ -72,7 +72,7 @@ graph LR
         K4[K4 苹果的Key]
     end
 
-    subgraph 注意力计算
+    subgraph attn_calc["注意力计算"]
         S["相似度计算<br/>Q4 · K1/K2/K3/K4"]
         A["Attention Weight<br/>(权重分配)"]
         O["Output = Σ(权重 × V)"]
@@ -132,7 +132,7 @@ Attention(Q, K, V) = softmax( Q × K^T / √d_k ) × V
 graph TB
     Input[输入 Token 序列]
 
-    subgraph 多头注意力
+    subgraph multi_head_attn["多头注意力"]
         H1[Head 1<br/>关注语法关系]
         H2[Head 2<br/>关注指代关系]
         H3[Head 3<br/>关注语义关联]
@@ -267,7 +267,7 @@ KV_Cache_Size = 2 × 32 × 131072 × 4096 × 2 bytes
 
 ```mermaid
 graph LR
-    subgraph 为什么需要KV Cache
+    subgraph why_kv_cache["为什么需要KV Cache"]
         Speed[推理速度<br/>从 O(N²) → O(N)]
         Memory[显存效率<br/>避免重复存储中间结果]
         Feasibility[可行性<br/>长上下文才可能实现]
@@ -359,7 +359,7 @@ mindmap
 
 ```mermaid
 graph LR
-    subgraph 碎片化的显存
+    subgraph fragmented_mem["碎片化的显存"]
         B1[用户A KV Cache 2K]
         F1[(空)]
         B2[用户B KV Cache 5K]
@@ -369,7 +369,7 @@ graph LR
         F4[(空)]
     end
 
-    subgraph 理想状态：连续规整
+    subgraph ideal_mem["理想状态：连续规整"]
         A1[用户A]
         A2[用户B]
         A3[用户C]
@@ -418,18 +418,18 @@ KV Cache 不仅是存储问题，也是**带宽问题**。
 
 ```mermaid
 graph TB
-    subgraph 单机KV Cache优化
-        subgraph 精度压缩方向
+    subgraph single_node_opt["单机KV Cache优化"]
+        subgraph precision_dir["精度压缩方向"]
             Q1[FP16 → FP8 / INT8 / INT4<br/>量化压缩]
         end
 
-        subgraph 稀疏化方向
+        subgraph sparse_dir["稀疏化方向"]
             S1[GQA/MQA 分组/多查询注意力<br/>减少 KV 头数]
             S2[Context Window 滑动窗口<br/>只保留最近 N 个]
             S3[KV Cache 剪枝<br/>扔掉不重要的 K/V]
         end
 
-        subgraph 管理优化方向
+        subgraph mgmt_dir["管理优化方向"]
             M1[PagedAttention 分页注意力<br/>vLLM 核心技术]
             M2[Prefix Cache 前缀缓存<br/>共享公共前缀]
             M3[Recomputation 重计算<br/>用计算换显存]
@@ -467,7 +467,7 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph MHA 多头注意力
+    subgraph mha_diag["MHA 多头注意力"]
         Qh1[Q头1] & Qh2[Q头2] & Qh3[Q头3] & Qh4[Q头4]
         Kh1[K头1] & Kh2[K头2] & Kh3[K头3] & Kh4[K头4]
         Vh1[V头1] & Vh2[V头2] & Vh3[V头3] & Vh4[V头4]
@@ -477,7 +477,7 @@ graph LR
         Qh4 --> Kh4
     end
 
-    subgraph MQA 多查询注意力
+    subgraph mqa_diag["MQA 多查询注意力"]
         Qm1[Q头1] & Qm2[Q头2] & Qm3[Q头3] & Qm4[Q头4]
         Km[K（共享）]
         Vm[V（共享）]
@@ -485,7 +485,7 @@ graph LR
         Qm1 & Qm2 & Qm3 & Qm4 --> Vm
     end
 
-    subgraph GQA 分组查询注意力
+    subgraph gqa_diag["GQA 分组查询注意力"]
         Qg1[Q头1] & Qg2[Q头2]
         Qg3[Q头3] & Qg4[Q头4]
         Kg1[K组1] & Kg2[K组2]
@@ -509,7 +509,7 @@ graph LR
 
 ```mermaid
 graph LR
-    subgraph 传统方式：连续存储
+    subgraph traditional_storage["传统方式：连续存储"]
         S1[序列A: 连续 8 块]
         F1[(空)]
         S2[序列B: 连续 5 块]
@@ -518,7 +518,7 @@ graph LR
         style F2 fill:#ffccbc
     end
 
-    subgraph PagedAttention：分页存储
+    subgraph paged_storage["PagedAttention：分页存储"]
         B1[页1] & B2[页2] & B3[页3] & B4[页4]
         B5[页5] & B6[页6] & B7[页7] & B8[页8]
 
@@ -555,11 +555,11 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 系统提示词（所有用户共享）
+    subgraph system_prompt["系统提示词（所有用户共享）"]
         P1[你是一个Java专家...]
     end
 
-    subgraph 不同的用户请求
+    subgraph user_requests["不同的用户请求"]
         U1[用户A的问题]
         U2[用户B的问题]
         U3[用户C的问题]
@@ -623,15 +623,15 @@ graph TD
 
 ```mermaid
 graph TB
-    subgraph 输入序列 [输入: 序列长度 N]
+    subgraph input_seq["输入序列（输入: 序列长度 N）"]
         X[X]
     end
 
-    subgraph GPU 0
+    subgraph gpu0["GPU 0"]
         KV0[KV Cache<br/>第 0~15 头]
     end
 
-    subgraph GPU 1
+    subgraph gpu1["GPU 1"]
         KV1[KV Cache<br/>第 16~31 头]
     end
 
@@ -658,12 +658,12 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph GPU 0
+    subgraph pp_gpu0["GPU 0"]
         L0[层 0 ~ 层 15]
         KV0[KV Cache: 层 0~15 的 K/V]
     end
 
-    subgraph GPU 1
+    subgraph pp_gpu1["GPU 1"]
         L1[层 16 ~ 层 31]
         KV1[KV Cache: 层 16~31 的 K/V]
     end
@@ -691,19 +691,19 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph GPU 0
+    subgraph cp_gpu0["GPU 0"]
         KV0[KV Cache<br/>Token 0 ~ N/4]
     end
 
-    subgraph GPU 1
+    subgraph cp_gpu1["GPU 1"]
         KV1[KV Cache<br/>Token N/4 ~ N/2]
     end
 
-    subgraph GPU 2
+    subgraph cp_gpu2["GPU 2"]
         KV2[KV Cache<br/>Token N/2 ~ 3N/4]
     end
 
-    subgraph GPU 3
+    subgraph cp_gpu3["GPU 3"]
         KV3[KV Cache<br/>Token 3N/4 ~ N]
     end
 ```

@@ -13,7 +13,7 @@
 
 ```mermaid
 graph TB
-    subgraph 原生LLM的三大局限
+    subgraph llm_limitations["原生LLM的三大局限"]
         A[无状态性<br/>Stateless]
         B[窗口有限<br/>Finite Context]
         C[知识固化<br/>Static Knowledge]
@@ -55,11 +55,11 @@ graph LR
     A[对话历史<br/>Chat History] -->|是原始素材| B[Agent 记忆<br/>Agent Memory]
     B -->|不等于| A
 
-    subgraph 对话历史
+    subgraph chat_history["对话历史"]
         R1[原始记录<br/>未处理<br/>全量保存<br/>按时间排列]
     end
 
-    subgraph Agent 记忆
+    subgraph agent_memory["Agent 记忆"]
         M1[经过筛选/提炼/结构化<br/>有组织/有标签/有重要度<br/>可以检索/可以遗忘<br/>分层分类存储]
     end
 
@@ -87,7 +87,7 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph Agent记忆四分类
+    subgraph memory_four_types["Agent记忆四分类"]
         WM[工作记忆<br/>Working Memory]
         EM[情景记忆<br/>Episodic Memory]
         SM[语义记忆<br/>Semantic Memory]
@@ -150,13 +150,13 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph 按存储形态分
+    subgraph by_storage_form["按存储形态分"]
         U[非结构化记忆<br/>文本/对话/文档<br/>向量库存储]
         S2[结构化记忆<br/>KV/图谱/数据表<br/>数据库存储]
         C[代码化记忆<br/>Skill/工具/工作流<br/>代码文件存储]
     end
 
-    subgraph 按读写模式分
+    subgraph by_rw_mode["按读写模式分"]
         R[只读记忆<br/>知识库/文档/配置<br/>写入：人工/离线<br/>读取：在线检索]
         W[读写记忆<br/>用户画像/对话记忆<br/>写入：在线实时<br/>读取：在线实时]
         B[批量更新记忆<br/>总结/反思/提炼<br/>写入：定时/离线批量<br/>读取：在线]
@@ -217,7 +217,7 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph 流动方向
+    subgraph flow_direction["流动方向"]
         Promotion[提升 Promote<br/>从冷到热]
         Demotion[降级 Demote<br/>从热到冷]
     end
@@ -427,7 +427,7 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph 记忆共享的四个维度
+    subgraph sharing_dimensions["记忆共享的四个维度"]
         T1[跨会话共享<br/>同用户多次对话]
         T2[跨Agent共享<br/>不同 Agent 同用户]
         T3[跨用户共享<br/>组织内知识沉淀]

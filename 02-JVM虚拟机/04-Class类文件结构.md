@@ -104,16 +104,17 @@ CA FE BA BE
 **概念：** 可以把常量池理解为Class文件的"仓库"或者"字典"，里面存放着这个类用到的**所有常量信息**。
 
 **常量池里存什么？**
-```
-两大类型：
-├── 字面量（Literal）
-│   ├── 字符串常量（如 "Hello World"）
-│   ├── 基本类型常量（如 100, 3.14, true）
-│   └── final常量
-└── 符号引用（Symbolic Reference）
-    ├── 类和接口的全限定名（如 java/lang/String）
-    ├── 字段的名称和描述符（如 name:Ljava/lang/String;）
-    └── 方法的名称和描述符（如 add:(II)I）
+```mermaid
+mindmap
+  root((常量池两大类型))
+    字面量（Literal）
+      字符串常量（如 "Hello World"）
+      基本类型常量（如 100, 3.14, true）
+      final常量
+    符号引用（Symbolic Reference）
+      类和接口的全限定名（如 java/lang/String）
+      字段的名称和描述符（如 name:Ljava/lang/String;）
+      方法的名称和描述符（如 add:(II)I）
 ```
 
 **为什么叫"常量池"？**

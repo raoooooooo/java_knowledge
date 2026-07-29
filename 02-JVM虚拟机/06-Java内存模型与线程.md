@@ -99,13 +99,16 @@ graph TB
 ```
 
 **回到开头的例子，为什么循环不会结束？**
-```
-时间线：
-1. 子线程从主内存读取 flag=true 到自己的工作内存
-2. 子线程一直在用自己工作内存里的 flag=true 循环
-3. 主线程把 flag=false 写回主内存
-4. 但是！子线程不知道主内存的flag变了，还是用自己工作内存里的旧值
-5. → 死循环！
+```mermaid
+sequenceDiagram
+    participant Sub as 子线程
+    participant MT as 主线程
+    participant MM as 主内存
+    Sub->>MM: 1. 读取 flag=true 到自己的工作内存
+    Note right of Sub: 2. 一直用自己工作内存里的<br/>flag=true 循环
+    MT->>MM: 3. 把 flag=false 写回主内存
+    Note right of Sub: 4. 子线程不知道主内存的 flag 变了<br/>还是用自己工作内存里的旧值
+    Note right of Sub: 5. 死循环！
 ```
 
 ---

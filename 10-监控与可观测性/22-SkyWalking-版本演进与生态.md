@@ -136,7 +136,6 @@ graph LR
     traditional["传统 APM<br/>（只关注应用性能）"] --> obs["可观测性<br/>（Traces + Metrics + Logs 统一）"]
 
     subgraph sw_evolution["SkyWalking 的演进"]
-        direction TB
         v67["v6-7：APM（Trace + 基础指标）"]
         v8["v8：+ Metrics（MAL + Meter）"]
         v9["v9：+ Logs（LAL + 日志关联）+ OpenTelemetry"]

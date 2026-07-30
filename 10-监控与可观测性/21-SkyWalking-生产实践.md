@@ -44,9 +44,9 @@ graph TD
     kafka --> rec1
     kafka --> rec2
     kafka --> rec3
-    rec1 -->|"gRPC 转发（数据分片）"| agg1
-    rec2 -->|"gRPC 转发（数据分片）"| agg2
-    rec3 -->|"gRPC 转发（数据分片）"| agg3
+    rec1 -->|gRPC 转发（数据分片）| agg1
+    rec2 -->|gRPC 转发（数据分片）| agg2
+    rec3 -->|gRPC 转发（数据分片）| agg3
     agg1 --> node1
     agg2 --> node2
     agg3 --> node3

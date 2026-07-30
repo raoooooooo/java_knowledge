@@ -74,7 +74,7 @@ Agent 每 20 秒通过 gRPC `fetchConfigurations` 主动向 OAP 拉取，OAP 背
 ```mermaid
 graph TB
     instances["order-service 的 3 个实例（Pod1/Pod2/Pod3）"]
-    instances -- "全部收到同一份 trace.sample_rate: 1000" --> quota["每个实例各自用 AtomicInteger 按 1000/3s 独立限流"]
+    instances -->|全部收到同一份 trace.sample_rate: 1000| quota["每个实例各自用 AtomicInteger 按 1000/3s 独立限流"]
     quota --> total["合计可能 3000 个/3s<br/>（下发的是「每实例配额」，非「全服务总量」）"]
 ```
 
@@ -82,8 +82,8 @@ graph TB
 
 ```mermaid
 flowchart TD
-    A["order-service（已采样）"] -- RPC --> B["payment-service（本该被丢弃）"]
-    B -->|"ContextCarrier 携带采样标记"| C["payment-service 收到 carrier<br/>调用 SamplingService.forceSampled()"]
+    A["order-service（已采样）"] -->|RPC| B["payment-service（本该被丢弃）"]
+    B -->|ContextCarrier 携带采样标记| C["payment-service 收到 carrier<br/>调用 SamplingService.forceSampled()"]
     C --> D["强制延续采样，链路完整<br/>（forceSampled 唯一用途）"]
 ```
 
@@ -121,26 +121,27 @@ agent-analyzer:
 ```mermaid
 graph TD
     subgraph lifecycle["请求生命周期"]
-        direction LR
-        start["请求开始"] --> end_node["请求结束"]
+        req_start["请求开始"]
+        req_end["请求结束"]
+        req_start --> req_end
     end
 
-    subgraph agent_side["Agent 决策点（请求开始时）"]
+    subgraph agent_dec["Agent 决策点（请求开始时）"]
         a1["不知道会不会出错"]
         a2["不知道耗时多久"]
         a3["只能做无脑计数/比例丢弃"]
         a4["省：网络带宽 + OAP 处理压力"]
     end
 
-    subgraph oap_side["OAP 决策点（请求结束后）"]
+    subgraph oap_dec["OAP 决策点（请求结束后）"]
         o1["已知 isError"]
         o2["已知 duration"]
         o3["可基于 error/slow 智能保留"]
         o4["省：存储空间"]
     end
 
-    start --> agent_side
-    end_node --> oap_side
+    req_start -.-> a1
+    req_end -.-> o1
 ```
 
 - **Agent 前置采样**省的是**带宽**（数据根本没发出去），但只能用固定比例/计数
@@ -161,7 +162,7 @@ graph LR
     subgraph oap_side["OAP 端"]
         watcher["AgentConfigurationsWatcher<br/>（监听配置变更）"]
         handler["ConfigurationDiscoveryServiceHandler<br/>（gRPC: fetchConfigurations()）"]
-        watcher -->|"②整段YAML解析成KV"| handler
+        watcher -->|②整段YAML解析成KV| handler
     end
 
     subgraph agent_side["Agent 端"]
@@ -171,9 +172,9 @@ graph LR
         cmd_service --> sw_watcher --> result
     end
 
-    config_data -- "①注册监听 / 变更通知" --> watcher
-    handler -- "③Agent 每 20s 主动 pull" --> agent_side
-    agent_side -- "④返回 Commands（KV list）" --> handler
+    config_data -->|①注册监听 / 变更通知| watcher
+    handler -.->|③Agent 每 20s 主动 pull| cmd_service
+    cmd_service -->|④返回 Commands（KV list）| handler
 ```
 
 关键澄清：
@@ -250,8 +251,6 @@ eBPF（extended Berkeley Packet Filter）是 Linux 内核的一项技术，允�
 ```mermaid
 graph TD
     subgraph rover["Rover（eBPF 探针）"]
-        direction TB
-
         subgraph network["网络监控"]
             n1["TCP 连接追踪（建立/关闭/重传）"]
             n2["HTTP/gRPC 协议分析"]

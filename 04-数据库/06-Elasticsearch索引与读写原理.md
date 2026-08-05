@@ -159,7 +159,68 @@ graph LR
 - `object`：嵌套 JSON（默认会被 flatten，丢失数组独立性）。
 - `nested`：**保持数组中每个对象的独立性**，能精确查询数组里某个对象同时满足多条件，代价高。
 
-### 3.4 ⚠️ Mapping 一旦建好不能改字段类型
+### 3.4 Mapping 核心参数详解
+
+| 参数 | 作用 | 默认值 | 常见场景 |
+|------|------|--------|---------|
+| `type` | 字段类型 | - | 必选，text/keyword/long/date 等 |
+| `index` | 是否建立倒排索引 | `true` | 不需要搜索的字段设 false 省空间和写入 |
+| `analyzer` | 写入/搜索时分词器 | `standard` | text 字段配 ik 分词等 |
+| `search_analyzer` | 搜索时专用分词器 | 同 analyzer | 写入用 ik_max_word、搜索用 ik_smart |
+| `doc_values` | 是否存 doc_values（排序聚合用） | `true`（非 text 默认开） | 不需排序聚合的字段可关，省空间 |
+| `store` | 是否单独存储字段值 | `false`（从 _source 取） | 一般不需要，特殊场景可开 |
+| `format` | 日期格式 | `strict_date_optional_time||epoch_millis` | date 字段用，如 `yyyy-MM-dd HH:mm:ss` |
+| `dynamic` | 动态映射策略 | `true` | true/false/strict，生产建议 false |
+| `ignore_above` | 超过长度的字符串不索引/不聚合 | keyword 默认 256 | 防超长字符串浪费空间 |
+| `coerce` | 是否自动类型转换（如字符串转数字） | `true` | 生产建议关 false，避免脏数据 |
+| `null_value` | null 值替换为指定值再索引 | null | 让 null 值也能被搜到 |
+
+> 💡 **优化口诀**：不需搜索关 index、不需聚合关 doc_values、不需排序关 doc_values、字段够用选小类型（byte 够用别用 long）。这是减少写放大、降存储、提性能的基础操作。
+
+### 3.5 object vs nested 类型（常考）
+
+#### object 类型（默认）
+
+```json
+{
+  "user": {
+    "type": "object",
+    "properties": {
+      "name": { "type": "keyword" },
+      "age": { "type": "integer" }
+    }
+  }
+}
+```
+
+写入 `{"user": [{"name":"张三","age":20}, {"name":"李四","age":30}]}` 时，**ES 会被 flatten（扁平化）** 存储为：
+```
+user.name: ["张三", "李四"]
+user.age: [20, 30]
+```
+数组中每个对象的独立性丢失了——查询 `name=张三 AND age=30` 也能命中（因为张三在 name 数组、30 在 age 数组），这是 object 的典型坑。
+
+#### nested 类型
+
+```json
+{
+  "user": {
+    "type": "nested",
+    "properties": {
+      "name": { "type": "keyword" },
+      "age": { "type": "integer" }
+    }
+  }
+}
+```
+
+nested 类型会把数组中**每个对象作为独立的隐藏文档存储**，保持对象独立性。查询必须用 `nested` 查询，能精确匹配「name=张三 且 age=20」。
+
+代价：nested 查询比普通查询慢，写入开销更大，聚合也更复杂。非必要不用。
+
+> 💡 **面试题**：object 和 nested 区别？答：object 数组会被扁平化，丢失对象独立性；nested 把每个数组对象作为独立文档存，查询用 nested 语法能精确匹配。nested 更准但更慢更贵。
+
+### 3.6 ⚠️ Mapping 一旦建好不能改字段类型
 
 - 已有字段的类型**不能修改**（如 text 改 keyword），要改只能 reindex 到新索引。
 - 这就是为什么生产要提前规划 mapping、用索引别名（alias）便于 reindex 无感切换。
@@ -205,6 +266,149 @@ graph TD
 - 这正是 ES **写放大**的隐蔽来源（merge 重写）：详见 07 章和 SkyWalking 存储引擎章节。
 
 > 💡 **面试答「ES 删除/更新为什么慢」**：删除是标记删除不立即释放空间，要等 segment merge；更新是先标记删再写新；大量删除/更新会让磁盘占用虚高，直到 merge 才回收。
+
+---
+
+## 四点五、索引管理进阶
+
+> 尚硅谷视频中索引操作是实操重点。下面补充生产常用的索引模板、动态模板、批量操作、别名等。
+
+### 4.5.1 索引模板（Index Template）
+
+**什么是索引模板**：预定义 settings 和 mappings，新建索引时自动匹配应用。日志/APM 等按时间滚动建索引的场景必备，避免每次手动配 mapping。
+
+```json
+// 创建模板
+PUT _template/logs_template
+{
+  "index_patterns": ["logs-*"],          // 匹配 logs- 开头的索引
+  "order": 1,                            // 模板优先级，数字大的覆盖小的
+  "settings": {
+    "number_of_shards": 3,
+    "number_of_replicas": 1,
+    "refresh_interval": "30s"
+  },
+  "mappings": {
+    "dynamic": false,                    // 关动态映射
+    "properties": {
+      "level": { "type": "keyword" },
+      "message": { "type": "text", "analyzer": "ik_max_word" },
+      "timestamp": { "type": "date", "format": "yyyy-MM-dd HH:mm:ss" }
+    }
+  }
+}
+```
+
+要点：
+- 模板只在**索引创建时**生效，修改模板不影响已有索引
+- 多个模板可匹配同一索引，按 `order` 优先级合并
+- **组件模板（Component Template）**（7.8+）：可复用的模板片段，索引模板引用多个组件模板，更灵活
+
+### 4.5.2 动态模板（Dynamic Template）
+
+根据字段名或类型动态决定映射类型。比 `dynamic: true` 更可控。
+
+```json
+PUT my_index
+{
+  "mappings": {
+    "dynamic_templates": [
+      {
+        "strings_as_keyword": {
+          "match_mapping_type": "string",       // 匹配 string 类型
+          "mapping": { "type": "keyword" }      // 映射为 keyword
+        }
+      },
+      {
+        "full_text": {
+          "match": "*_text",                    // 字段名以 _text 结尾
+          "mapping": { "type": "text", "analyzer": "ik_max_word" }
+        }
+      },
+      {
+        "long_as_integer": {
+          "path_match": "counts.*",             // 路径匹配
+          "match_mapping_type": "long",
+          "mapping": { "type": "integer" }      // 降为 integer 省空间
+        }
+      }
+    ]
+  }
+}
+```
+
+> 动态模板比关动态映射灵活，适合「字段不确定但有命名规律」的场景。
+
+### 4.5.3 批量操作（Bulk API）
+
+单条写太慢，生产都用 bulk。一次请求可混合多种操作，减少网络往返。
+
+```json
+POST _bulk
+{ "index": { "_index": "my_index", "_id": "1" } }
+{ "title": "文档1", "price": 100 }
+{ "create": { "_index": "my_index", "_id": "2" } }
+{ "title": "文档2", "price": 200 }
+{ "update": { "_index": "my_index", "_id": "1" } }
+{ "doc": { "price": 150 } }
+{ "delete": { "_index": "my_index", "_id": "2" } }
+```
+
+四种操作：
+- **index**：存在则覆盖，不存在则创建
+- **create**：只创建，存在则报错
+- **update**：部分更新（`doc` 或 `script`）
+- **delete**：删除
+
+要点：
+- 每一行是 JSON，最后一行也要换行
+- 单条 bulk 建议 **5~15MB**，不是越大越好
+- 操作失败不影响其他操作，返回结果逐条标记成功/失败
+- 按分片分组提交可减少协调节点路由开销
+
+### 4.5.4 索引别名（Alias）
+
+别名是索引的「软链接」，一个别名可指向多个索引，一个索引可被多个别名指向。
+
+```json
+// 创建别名
+POST _aliases
+{
+  "actions": [
+    { "add": { "index": "products_v2", "alias": "products" } }
+  ]
+}
+
+// 平滑切换（原子操作：删旧加新）
+POST _aliases
+{
+  "actions": [
+    { "remove": { "index": "products_v1", "alias": "products" } },
+    { "add": { "index": "products_v2", "alias": "products" } }
+  ]
+}
+```
+
+**为什么别名重要**：
+- reindex 时**无感切换**：建新索引 → 切换别名 → 删旧索引，业务无感知
+- 多索引查询：一个别名指向多个索引（如 `logs-2026.07.*`），查别名一次查全
+- **write alias**：指定哪个索引是写入索引（`is_write_index: true`），rollover 必备
+
+> 💡 **生产最佳实践**：业务代码永远用别名访问，不用真实索引名。reindex/重建时切换别名，零停机。
+
+### 4.5.5 Multi Get（\_mget）批量查
+
+按多个 _id 批量查文档，比多次 GET 省网络：
+
+```json
+GET _mget
+{
+  "docs": [
+    { "_index": "my_index", "_id": "1" },
+    { "_index": "my_index", "_id": "2" }
+  ]
+}
+```
 
 ---
 

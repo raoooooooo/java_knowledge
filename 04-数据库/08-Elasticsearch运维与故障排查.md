@@ -373,7 +373,45 @@ POST logs-*/_forcemerge?max_num_segments=1
 
 > ⚠️ **副本设 0 期间是单点**：批量导入时临时关副本可大幅提速，但此期间该分片只有一份，节点故障会丢数据。只用于可重放的数据导入，写完必须恢复副本。
 
-### 7.5 预防
+### 7.5 segment 管理与 force_merge ★
+
+Segment 是 ES 存储的基本单元，太多小 segment 会导致：查询慢（要开很多文件）、堆占用高（元数据）、文件句柄浪费。
+
+#### 7.5.1 merge 策略参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `index.merge.policy.max_merged_segment` | 5GB | 单个 merged segment 上限 |
+| `index.merge.policy.segments_per_tier` | 10 | 每层 segment 数 |
+| `index.merge.scheduler.max_thread_count` | Math.min(3, 核数/2) | merge 并发线程数 |
+
+- 写入密集场景可适当调大 `max_thread_count`，加速 merge 避免 segment 堆积
+- 但别调太大，merge 吃磁盘 IO，会影响正常读写
+
+#### 7.5.2 force_merge（强制合并）
+
+手动触发 segment 合并，把多个小 segment 合并成少量大 segment，同时物理删除被标记删除的文档。
+
+```bash
+# 合并为 1 个 segment（最大化压缩，但非常耗 IO）
+POST logs-2026.07.01/_forcemerge?max_num_segments=1
+
+# 只合并已被删除文档占比超过某个阈值的 segment
+POST my_index/_forcemerge?only_expunge_deletes=true
+```
+
+**适用场景**：
+- 只读索引（历史日志）合并降存储和降 segment 数
+- 大量删除后释放磁盘空间
+- ILM warm/cold 阶段自动执行
+
+**注意事项**：
+- ⚠️ **非常耗 IO 和 CPU**，生产必须在低峰期执行
+- ⚠️ 只对**不再写入**的索引做（冷数据），热索引做了还会生成新 segment
+- ⚠️ 不要对 hot 层的活跃索引做 force_merge，越合并越慢
+- 合并过程中集群可能变慢，设好 `indices.recovery.max_bytes_per_sec` 限流
+
+### 7.6 预防
 
 - 永远用 bulk，按 5~15MB 分批。
 - 写密集场景 refresh_interval 调大、translog async。
@@ -390,6 +428,79 @@ POST logs-*/_forcemerge?max_num_segments=1
 - 日志：慢查询日志 `index_search_slowlog` 有记录。
 
 ### 8.2 排查
+
+```bash
+# 1. 看查询耗时和 QPS
+GET _nodes/stats/indices/search
+# query_total / query_time_in_millis 算单次延迟
+
+# 2. 配置慢查询日志（先开慢日志阈值）
+```
+
+#### 8.2.1 慢日志完整配置
+
+慢日志分 **查询慢日志**（search slowlog）和 **索引慢日志**（indexing slowlog），按级别（warn/info/debug/trace）分别设阈值：
+
+```bash
+# 查询慢日志
+PUT logs-*/_settings
+{
+  "index.search.slowlog.threshold.query.warn": "5s",     // query 阶段超 5s 打 warn
+  "index.search.slowlog.threshold.query.info": "2s",
+  "index.search.slowlog.threshold.query.debug": "500ms",
+  "index.search.slowlog.threshold.query.trace": "100ms",
+
+  "index.search.slowlog.threshold.fetch.warn": "1s",     // fetch 阶段超 1s 打 warn
+  "index.search.slowlog.threshold.fetch.info": "500ms",
+  "index.search.slowlog.level": "info"                   // 记录级别，info 及以上才落盘
+}
+
+# 索引慢日志
+PUT logs-*/_settings
+{
+  "index.indexing.slowlog.threshold.index.warn": "10s",
+  "index.indexing.slowlog.threshold.index.info": "5s",
+  "index.indexing.slowlog.source": "1000"                // 最多记录 1000 字符的 source
+}
+```
+
+慢日志文件位置：`path.logs` 目录下，文件名形如：
+- `<cluster>_index_search_slowlog.json`（查询慢日志）
+- `<cluster>_index_indexing_slowlog.json`（索引慢日志）
+
+> 💡 慢日志是**按索引级别**配置的，可以只对怀疑慢的索引开，避免全集群开了日志量爆炸。上线前建议设 warn 5s，有问题再调低。
+
+#### 8.2.2 用 profile API 精确定位慢查询
+
+找到慢查询后，用 `?profile=true` 查看每个子句耗时分布：
+
+```bash
+GET my_index/_search?profile=true
+{
+  "query": {
+    "bool": {
+      "must": [{ "match": { "title": "手机" } }],
+      "filter": [{ "range": { "price": { "gte": 100 } } }]
+    }
+  }
+}
+```
+
+profile 返回结果里每个查询类型、每个分片的耗时、打分耗时、advance 次数都有，直接定位是哪一步慢。
+
+#### 8.2.3 排查步骤
+
+```bash
+# 1. 看整体查询耗时
+GET _nodes/stats/indices/search
+
+# 2. 开慢日志抓慢查询（配好阈值等日志）
+#    去日志目录 grep slowlog
+
+# 3. 拿慢查询 DSL，用 profile 分析
+#    在 Kibana Dev Tools 里跑 ?profile=true
+
+# 4. 根据 profile 结果定位是哪类慢（wildcard / 深分页 / 大聚合 / script）
 
 ```bash
 # 1. 看查询耗时和 QPS
@@ -917,7 +1028,65 @@ GET _cat/indices/logs-*?v&h=index,docs.count,store.size,creation.date
 
 ---
 
-## 十八、常见面试题（运维向）
+## 十八、运维速查手册
+
+> 尚硅谷视频实操部分大量使用 Kibana Dev Tools 与 \_cat API。下面整理生产最常用的速查表，面试被问到「怎么查 XX」也能快速说出来。
+
+### 18.1 \_cat 系列命令速查
+
+所有 \_cat 命令都支持 `?v`（显示表头）、`?help`（看支持哪些列）、`?h=col1,col2`（指定列）、`?s=col:desc`（排序）。
+
+| 命令 | 作用 | 常用场景 |
+|------|------|---------|
+| `_cat/health?v` | 集群健康总览 | 第一眼看集群状态 |
+| `_cat/nodes?v` | 节点列表 | 看节点角色、堆、磁盘、CPU |
+| `_cat/indices?v&s=store.size:desc` | 索引列表（按大小排序） | 找大索引、看索引健康 |
+| `_cat/shards?v` | 分片分布 | 看分片在哪个节点、状态 |
+| `_cat/allocation?v` | 各节点分片数与磁盘 | 看磁盘使用率、分片分布均不均 |
+| `_cat/thread_pool?v&h=node,name,active,queue,rejected` | 线程池状态 | 排查 rejected、过载 |
+| `_cat/recovery?v&active_only=true` | 正在进行的 recovery | 看恢复进度 |
+| `_cat/pending_tasks` | Master 待处理任务 | 排查 Master 过载 |
+| `_cat/aliases?v` | 别名列表 | 查别名指向哪些索引 |
+| `_cat/templates?v` | 索引模板列表 | 查有哪些模板 |
+| `_cat/plugins?v` | 插件列表 | 查各节点装了什么插件 |
+| `_cat/segments/<index>?v` | 索引 segment 详情 | 排查 segment 数 |
+| `_cat/fielddata?v` | fielddata 占用 | 排查 text 聚合占堆 |
+| `_cat/nodeattrs?v` | 节点自定义属性 | 查 rack/tier 属性 |
+
+### 18.2 常用排查命令组合
+
+```bash
+# 看集群状态 + pending tasks（Master 是否堵）
+GET _cluster/health
+GET _cluster/pending_tasks
+
+# 看节点负载（哪些节点忙）
+GET _cat/nodes?v&h=name,role,heap.percent,ram.percent,disk.used_percent,cpu,load_1m&s=cpu:desc
+
+# 找最大的 10 个索引
+GET _cat/indices?v&h=index,health,docs.count,store.size&s=store.size:desc&v=true
+
+# 找未分配的分片
+GET _cat/shards?v&h=index,shard,prirep,state,unassigned.reason,node&s=state
+
+# 看哪些线程池在拒绝
+GET _cat/thread_pool?v&h=node,name,active,queue,rejected&s=rejected:desc
+
+# 热点线程（谁在吃 CPU）
+GET _nodes/hot_threads?threads=10&interval=5s
+```
+
+### 18.3 Kibana Dev Tools 小技巧
+
+- **Ctrl/Cmd + Enter**：执行当前光标所在的请求
+- **Ctrl/Cmd + / **：注释/取消注释
+- **自动补全**：输入 DSL 时按 Tab 补全
+- **历史记录**：右侧 History 面板查看历史执行
+- **多个请求**：一个文件里写多个请求，光标在哪执行哪个（用空行分隔）
+
+---
+
+## 十九、常见面试题（运维向）
 
 1. **ES 集群 Red 怎么排查？**
    先 `GET _cluster/health` 确认，`GET _cat/shards?v` 找 UNASSIGNED 分片，`GET _cluster/allocation/explain` 看被哪个 decider 拒绝。常见原因：磁盘超水位线、节点掉线、副本与主同节点。止血优先（清磁盘/加节点/调水位线），再查根因。
@@ -955,9 +1124,24 @@ GET _cat/indices/logs-*?v&h=index,docs.count,store.size,creation.date
 12. **ES 怎么备份？**
     注册快照仓库（fs/s3），`PUT _snapshot/repo/snapshot_name` 打快照（增量、可异步）。恢复用 `POST _snapshot/repo/snapshot/_restore`，可 rename 避免覆盖。生产每天全量+频繁增量，定期在隔离环境演练恢复。升级/大变更前必打快照。
 
+13. **ELK 各组件作用是什么？数据流怎么走？**
+    E=Elasticsearch（存储检索）、L=Logstash（采集过滤转换，input→filter→output）、K=Kibana（可视化）。典型数据流：Filebeat（端采集日志）→ Logstash（过滤解析）→ Elasticsearch（存）→ Kibana（展示）。小场景 Filebeat 可直接写 ES 省掉 Logstash。
+
+14. **Java 客户端有哪些？区别？**
+    TransportClient（TCP，7.x弃8.x移）、RestHighLevelClient（HTTP，7.x主力）、Elasticsearch Java Client（构建者模式，8.x推荐）。生产7.x用 RestHighLevelClient，8.x用新 Java Client。面试常问：Transport 走 9300、REST 走 9200，官方推动 HTTP 方向。
+
+15. **force_merge 什么时候用？有什么注意事项？**
+    对只读/冷索引手动合并 segment，降 segment 数、释放被删文档占的空间。注意：① 非常耗 IO，低峰做；② 只对不再写入的冷索引做，热索引做了白做还会新增；③ max_num_segments=1 最省空间但代价最大；④ ILM 可自动触发。
+
+16. **ES 慢查询怎么排查？完整步骤？**
+    ① 开慢查询日志（search.slowlog.threshold）抓慢查询 DSL；② 用 `?profile=true` 看每个子句/分片耗时；③ 定位根因：wildcard/深分页/大聚合/script/大_source/分片太多；④ 对应优化：改match/用search_after/缩小聚合范围/加filter/用routing。
+
+17. **索引别名有什么用？为什么生产建议用别名？**
+    索引的软链接。用处：① reindex 时无感切换（原子删旧加新），业务零停机；② 一个别名指向多个索引，一次查多天数据；③ write alias + rollover 自动滚动建索引。业务代码永远访问别名，不直接访问真实索引名。
+
 ---
 
-## 十九、资料勘误与重点提醒
+## 二十、资料勘误与重点提醒
 
 1. **「只读锁会自动解除」是错的**：很多资料/教程说「磁盘降下来只读会自动恢复」。实际 `read_only_allow_delete` 触发后**即使磁盘下降也不会自动清除**，必须 `PUT` 手动解除。线上因这个误解导致业务长时间写不进的案例很多。
 

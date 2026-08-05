@@ -50,7 +50,80 @@ ES 用 **JSON 描述查询**，叫 Query DSL。两大查询上下文是调优的
 
 > ⚠️ **经典坑**：`term` 查 text 字段经常搜不到！因为 text 写入时分词了，`term` 不分词去精确匹配分词后的 token。查精确值要用 keyword 子字段或 term 查 keyword 字段。
 
-### 1.3 wildcard 的陷阱
+### 1.3 高亮查询（Highlight）
+
+搜索结果中把匹配的关键词标记出来，前端展示时高亮显示。
+
+```json
+GET /products/_search
+{
+  "query": {
+    "match": { "title": "手机" }
+  },
+  "highlight": {
+    "fields": {
+      "title": {
+        "pre_tags": ["<em>"],
+        "post_tags": ["</em>"],
+        "fragment_size": 150,        // 片段长度
+        "number_of_fragments": 3     // 返回几个片段
+      }
+    }
+  }
+}
+```
+
+返回结果中会有 `highlight` 字段，包含加了 `<em></em>` 标签的匹配文本。
+
+三种高亮器：
+- **unified**（默认）：综合性能和效果，大多数场景用
+- **plain**：更精确，但大字段慢
+- **fvh**（fast vector highlighter）：大字段性能好，但需要 term_vector 支持，写入开销大
+
+### 1.4 搜索建议（Suggester）/ 自动补全
+
+用户输入时给出建议，电商搜索框常用。ES 有四类 suggester：
+
+| 类型 | 用途 | 场景 |
+|------|------|------|
+| **term** | 单个词纠错建议 | "huawe" → "huawei" |
+| **phrase** | 短语纠错 | 整句纠错建议 |
+| **completion** | 自动补全（前缀匹配） | 搜索框下拉建议 ★ 最常用 |
+| **context** | 带上下文的补全 | 按分类过滤建议 |
+
+**Completion Suggester 示例**：
+
+```json
+// mapping：completion 类型（专门用于自动补全的特殊类型）
+PUT /goods
+{
+  "mappings": {
+    "properties": {
+      "name": { "type": "completion" },
+      "category": { "type": "keyword" }
+    }
+  }
+}
+
+// 搜索建议查询
+POST /goods/_search
+{
+  "suggest": {
+    "name_suggest": {
+      "prefix": "华",
+      "completion": {
+        "field": "name",
+        "size": 10,
+        "skip_duplicates": true
+      }
+    }
+  }
+}
+```
+
+> ⚠️ completion 字段是**特殊类型**，用 FST 前缀树存到内存，查询极快（O(1)），但只支持前缀匹配，不支持模糊。适用搜索框联想场景。
+
+### 1.5 wildcard 的陷阱
 
 - `wildcard` 通配符查询（如 `*手机*`）**前缀是通配符时无法用倒排索引**，几乎全 term 扫描，极慢。
 - 能用 `match` / `match_phrase` 就别用 wildcard；真要前缀搜索用 `prefix` 或 completion suggester。
@@ -382,7 +455,219 @@ graph LR
 
 ---
 
-## 九、资料勘误与重点提醒
+## 九、Java 客户端集成 ★ 面试高频
+
+> 尚硅谷视频后半段有 Java 客户端集成实战。实际开发中 ES 都是通过 Java API 调用，面试也常被问到 RestHighLevelClient 和 Spring Data Elasticsearch。
+
+### 9.1 Java 客户端演进
+
+| 客户端 | 版本 | 状态 |
+|---------|------|------|
+| **Transport Client** | 5.x 及以前 | 7.0 废弃，8.0 移除，走 TCP（9300） |
+| **RestHighLevelClient** | 7.x 主流 | 走 HTTP（9200），7.x 主力，8.0 后仍兼容但推荐新客户端 |
+| **Elasticsearch Java Client（新客户端）** | 8.x 推荐 | 基于构建者模式，API 更简洁，8.x 官方首选 |
+
+> 面试如果不指定版本，默认答 **RestHighLevelClient**（7.x 最主流）。
+
+### 9.2 RestHighLevelClient 使用
+
+**依赖**：
+```xml
+<dependency>
+  <groupId>org.elasticsearch.client</groupId>
+  <artifactId>elasticsearch-rest-high-level-client</artifactId>
+  <version>7.17.0</version>
+</dependency>
+```
+
+**初始化**：
+```java
+RestHighLevelClient client = new RestHighLevelClient(
+  RestClient.builder(
+    new HttpHost("localhost", 9200, "http"),
+    new HttpHost("localhost", 9201, "http")  // 多节点
+  )
+);
+```
+
+**索引操作**：
+```java
+// 创建索引
+CreateIndexRequest request = new CreateIndexRequest("products");
+request.source(mappingJson, XContentType.JSON);
+CreateIndexResponse resp = client.indices().create(request, RequestOptions.DEFAULT);
+
+// 删除索引
+DeleteIndexRequest delReq = new DeleteIndexRequest("products");
+client.indices().delete(delReq, RequestOptions.DEFAULT);
+```
+
+**文档 CRUD**：
+```java
+// 新增
+IndexRequest indexReq = new IndexRequest("products").id("1");
+indexReq.source(JSON.toJSONString(goods), XContentType.JSON);
+client.index(indexReq, RequestOptions.DEFAULT);
+
+// 按ID查询
+GetRequest getReq = new GetRequest("products", "1");
+GetResponse getResp = client.get(getReq, RequestOptions.DEFAULT);
+
+// 更新（部分更新）
+UpdateRequest updateReq = new UpdateRequest("products", "1");
+updateReq.doc("price", 99);
+client.update(updateReq, RequestOptions.DEFAULT);
+
+// 删除
+DeleteRequest deleteReq = new DeleteRequest("products", "1");
+client.delete(deleteReq, RequestOptions.DEFAULT);
+
+// 批量 bulk
+BulkRequest bulkReq = new BulkRequest();
+bulkReq.add(new IndexRequest("products").id("1").source(...));
+bulkReq.add(new DeleteRequest("products", "2"));
+BulkResponse bulkResp = client.bulk(bulkReq, RequestOptions.DEFAULT);
+```
+
+**查询操作（核心）**：
+```java
+SearchRequest searchReq = new SearchRequest("products");
+SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
+
+// bool 查询
+BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
+  .must(QueryBuilders.matchQuery("title", "手机"))
+  .filter(QueryBuilders.termQuery("status", 1))
+  .filter(QueryBuilders.rangeQuery("price").gte(100).lte(1000))
+  .mustNot(QueryBuilders.termQuery("deleted", true));
+
+sourceBuilder.query(boolQuery);
+sourceBuilder.from(0).size(10);
+sourceBuilder.sort("price", SortOrder.ASC);
+sourceBuilder.highlighter(
+  new HighlightBuilder().field("title")
+    .preTags("<em>").postTags("</em>")
+);
+
+// 聚合
+sourceBuilder.aggregation(
+  AggregationBuilders.terms("by_brand").field("brand.keyword").size(10)
+    .subAggregation(AggregationBuilders.avg("avg_price").field("price"))
+);
+
+searchReq.source(sourceBuilder);
+SearchResponse resp = client.search(searchReq, RequestOptions.DEFAULT);
+```
+
+### 9.3 Spring Data Elasticsearch
+
+Spring Boot 整合的便捷方式，类似 JPA 的接口式编程。
+
+**依赖**：
+```xml
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+</dependency>
+```
+
+**实体类**：
+```java
+@Data
+@Document(indexName = "products")
+public class Product {
+    @Id
+    private Long id;
+
+    @Field(type = FieldType.Text, analyzer = "ik_max_word")
+    private String title;
+
+    @Field(type = FieldType.Keyword)
+    private String brand;
+
+    @Field(type = FieldType.Double)
+    private Double price;
+
+    @Field(type = FieldType.Date, format = DateFormat.date_time)
+    private LocalDateTime createTime;
+}
+```
+
+**Repository 接口**：
+```java
+public interface ProductRepository extends ElasticsearchRepository<Product, Long> {
+
+    // 方法名派生查询
+    List<Product> findByTitle(String title);
+
+    List<Product> findByBrandAndPriceBetween(String brand, Double min, Double max);
+
+    Page<Product> findByTitleContaining(String title, Pageable pageable);
+}
+```
+
+**ElasticsearchRestTemplate**：复杂查询用模板：
+```java
+@Autowired
+private ElasticsearchRestTemplate template;
+
+public Page<Product> search(String keyword, int page, int size) {
+    BoolQueryBuilder boolQuery = QueryBuilders.boolQuery()
+      .must(QueryBuilders.matchQuery("title", keyword));
+
+    NativeSearchQuery query = new NativeSearchQueryBuilder()
+      .withQuery(boolQuery)
+      .withPageable(PageRequest.of(page, size))
+      .withHighlightFields(new HighlightBuilder.Field("title"))
+      .build();
+
+    return template.search(query, Product.class);
+}
+```
+
+### 9.4 8.x 新客户端（Elasticsearch Java Client）
+
+8.x 官方推荐，基于构建者模式，类型安全：
+
+```java
+// 初始化
+RestClient restClient = RestClient.builder(new HttpHost("localhost", 9200)).build();
+ElasticsearchTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
+ElasticsearchClient esClient = new ElasticsearchClient(transport);
+
+// 新增文档
+Product p = new Product(1L, "华为手机", 3999.0);
+esClient.index(b -> b
+  .index("products").id("1").document(p)
+);
+
+// 查询
+SearchResponse<Product> resp = esClient.search(s -> s
+  .index("products")
+  .query(q -> q.match(m -> m.field("title").query("手机"))),
+  Product.class);
+```
+
+特点：构建者模式（Lambda 链式调用）、强类型、IDE 补全好。8.x 是未来方向，但面试目前 7.x RestHighLevelClient 仍为主流。
+
+### 9.5 面试常问
+
+**Q1：Transport Client 和 RestHighLevelClient 区别？**
+- Transport Client 走 TCP（9300），集群内部协议，7.0 弃用 8.0 移除
+- RestHighLevelClient 走 HTTP（9200），RESTful 方式，7.x 主力
+- HTTP 更通用、跨语言、兼容好，是官方推动方向
+
+**Q2：Repository 和 Template 怎么选？**
+- 简单 CRUD 用 Repository（方法名派生，方便）
+- 复杂查询（多条件组合、聚合、高亮）用 Template（灵活组装 DSL）
+
+**Q3：如何保证 Java 客户端与 ES 版本兼容？**
+- 客户端大版本必须与服务端大版本一致（7.x 客户端连 7.x 服务端）
+- 小版本向前兼容，建议保持一致避免踩坑
+
+---
+
+## 十、资料勘误与重点提醒
 
 1. **type 已弃用**：早期资料/课程仍讲「Index=库、Type=表、Document=行」，把 Index 当数据库、Type 当表。**这是过时认知**：7.x 起 type 弃用、8.0 移除，现在 **Index 就当一张表**，不要再用 type 概念。
 2. **「ES 是数据库」要带限定**：ES 具备数据库特征但**不是通用 RDBMS**，没有跨文档事务和强 Join 能力。面试说「是数据库」要补「是搜索型/文档型 NoSQL」。
@@ -390,3 +675,5 @@ graph LR
 4. **refresh vs flush 易混**：refresh 是「可搜」（生成内存 segment，没落盘），flush 才是「持久化」（fsync+清 translog）。面试常被绕，务必分清。
 5. **APM 场景写放大是高频进阶点**：与 SkyWalking 存储引擎章节呼应，体现「为不需要的全文搜索付写入代价」，是 ES 在可观测性场景被替代的主因。
 6. **「大量创建索引」≠「大量写入文档」**：中文「索引」既是名词（index 集合）又是动词（建倒排）。大量创建索引卡 Master 元数据串行队列（pending_tasks），大量写入文档卡 segment 生成与 merge（indexing 线程池）。两类风暴根因和解法都不同，排查时先分清是哪一类。
+7. **Transport Client 已过时**：很多教程/视频还在讲 TransportClient。**7.0 已弃用、8.0 移除**，生产用 RestHighLevelClient，8.x 推荐新 Java Client。面试别说错版本。
+8. **completion 自动补全不是万能**：completion 类型只支持前缀匹配，不支持中间/后缀匹配，也不支持模糊。要模糊纠错用 term/phrase suggester，别搞混。

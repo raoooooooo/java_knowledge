@@ -28,6 +28,70 @@
 
 ---
 
+## 一点五、Elastic Stack（ELK）生态全景
+
+> 尚硅谷视频以 ELK 技术栈为主线讲解。ES 从不只是一个搜索引擎，而是一整套数据收集、存储、检索、可视化的生态。面试时被问到「ELK 是什么」要能说出各组件的分工。
+
+### 1.5.1 ELK 是什么
+
+| 组件 | 角色 | 一句话说明 |
+|-------|------|-----------|
+| **E = Elasticsearch | 存储与检索核心 | 存数据、建索引、搜索、聚合 |
+| **L = Logstash | 数据采集与转换 | input → filter → output 管道，从多种输入源写目的地 |
+| **K = Kibana | 可视化与管理 | 画仪表盘、Dev Tools、监控、Discover 探索数据 |
+
+### 1.5.2 Beats 家族（后加入后称 Elastic Stack）
+
+Logstash 偏重但重，后推出更轻量的 **Beats** 做端采集器，直接采集后 ELK 升级为 **Elastic Stack**：
+
+| Beat | 用途 | 场景 |
+|------|------|------|
+| **Filebeat** | 采集日志文件 | 最常用，tail - 采集 Nginx/应用日志 |
+| **Metricbeat** | 采集系统/指标 | 服务器 CPU/内存/磁盘指标 |
+| **Packetbeat** | 采集网络数据包 | 网络流量分析、APM 前身 |
+| **Heartbeat** | 主动探测可用性 | 站点/服务拨测监控 |
+| **Auditbeat** | 审计数据审计 | 文件完整性、登录审计 |
+| **Functionbeat** | 无服务器采集 | 云函数场景（云环境） |
+
+典型数据流：**Beats（端采集）→ Logstash（过滤转换）→ Elasticsearch（存储检索）→ Kibana（可视化）**
+
+小场景也可以 Beats 直接写 ES（如 Filebeat → ES（无 Logstash。
+
+### 1.5.3 Logstash 核心三段式
+
+- **Input（输入）**：从哪里读数据。常用：
+  - `file`：读文件（配合 sincedb 记录读取位置
+  - `jdbc`：从数据库拉数据
+  - `kafka`：从 Kafka 消费
+  - `beats`：接收 Beats 发来的数据
+  - `stdin`：标准输入（测试用）
+- **Filter（过滤转换）**：中间处理，核心价值所在常用：
+  - `grok`：用正则解析非结构化日志（如 Nginx access log → 结构化字段
+  - `date`：解析时间字段，覆盖默认 @timestamp
+  - `mutate`：字段增删改、类型转换
+  - `json`：解析 JSON 格式字段
+  - `geoip`：IP → 地理位置
+- **Output（输出）**：写到哪里去常用：
+  - `elasticsearch`：输出到 ES
+  - `kafka`：输出到 Kafka
+  - `stdout`：控制台（测试用）
+  - `file`：文件
+
+### 1.5.4 Kibana 核心功能
+
+| 模块 | 作用 |
+|------|------|
+| **Discover** | 数据探索，搜索过滤日志，看原始数据 |
+| **Visualize** | 创建可视化图（柱状图/折线图/饼图/数据表） |
+| **Dashboard** | 仪表盘，组合多个可视化 |
+| **Dev Tools** | DSL 调试神器（Console） |
+| **Stack Monitoring** | 监控 ES 集群状态 |
+| **Management** | 索引模式、高级设置 |
+
+> 索引模式（Index Pattern）** 是 Kibana 访问 ES 索引的桥梁，配置后才能在 Discover/Visualize 里选索引。支持通配符如 `logstash-*`，按天滚动索引。
+
+---
+
 ## 二、概念模型（对照 MySQL 理解）
 
 ES 的概念和关系型数据库一一对应但**不等同**，用对照表最快建立认知：
@@ -800,7 +864,53 @@ GET _cat/aliases?v                     # 别名
 
 ---
 
-## 十七、资料勘误与重点提醒
+## 十七、7.x → 8.x 版本演进与新特性
+
+> 尚硅谷视频标题明确提到「7.x+8.x 新特性」。面试中常被问到 7.x 和 8.x 的区别，以及某特性是哪个版本引入的。下面梳理关键版本节点。
+
+### 17.1 6.x → 7.x 核心变化
+
+| 变化点 | 说明 |
+|--------|------|
+| **Type 弃用** | 7.0 起一个 Index 只能有一个 type（默认 `_doc`），type 正式标记 deprecated |
+| **默认主分片数 1** | 默认从 5 改为 1（小索引不再浪费分片） |
+| **zen2 选主** | 重写 Discovery 层为 zen2（类 Raft 任期制），不再需要手动配 `minimum_master_nodes` |
+| **集群协调重构** | 自动选主 + quorum 管理，脑裂问题基本从机制上解决 |
+| **SQL 查询** | 新增 `_sql` 接口，可用 SQL 查询 ES |
+| **数据层（Data Tier）** | 7.10 引入 data_content / data_hot / data_warm / data_cold / data_frozen，取代旧版单一 `node.data` |
+| **ILM 成熟** | 索引生命周期管理从 beta 走向成熟，日志场景标配 |
+| **Frozen 层 + Searchable Snapshot | 7.10+ 引入冻结层，冷数据存对象存储按需加载，存储成本大降 |
+
+### 17.2 7.x → 8.x 核心变化
+
+| 变化点 | 说明 |
+|--------|------|
+| **Type 彻底移除** | 8.0 正式删除 type 概念，只剩 `_doc` |
+| **默认启用安全** | 首次启动自动开启认证（用户名密码）、TLS 加密、API Key |
+| **kNN 向量搜索** | 原生支持近似最近邻搜索，适配 AI/大模型/向量检索场景 |
+| **PyTorch 模型推理** | 支持加载 PyTorch 模型，在 ES 内做 NLP 推理（如文本分类、命名实体识别） |
+| **Data Stream** | 数据流正式 GA，简化时序数据管理（自动建索引、自动滚动） |
+| **API Key 增强** | 更细粒度、更完善的 API Key 管理 |
+| **Operator 模式** | K8s 上 ES Operator 更成熟，简化云原生部署运维 |
+| **性能提升** | 查询、聚合、存储压缩率优化，整体更快更省 |
+
+### 17.3 8.x 安全默认开启（重要变化）
+
+8.x 最直观的变化是**安全默认开启**：
+- 首次启动自动生成 `elastic` 用户随机密码（不再是无密码）
+- transport 层（节点间）默认启用 TLS
+- 生产环境不再需要手动一步步开安全，更安全也更省事
+
+### 17.4 面试常问：7.x 和 8.x 最大的区别是什么
+
+**核心答案**：安全默认开启 + kNN 向量搜索 + type 彻底移除 + 数据层更完善。
+- 安全是运维感知最强的变化（不再裸奔）
+- kNN 是功能上最大的新增（拥抱 AI 时代向量检索）
+- type 移除是兼容性上的 breaking change
+
+---
+
+## 十八、资料勘误与重点提醒
 
 1. **「数据节点 = node.data」是旧认知**：很多资料还讲单一的 `node.data: true/false`。**7.10+ 引入 data tier**，`node.data` 被拆成 `data_content/data_hot/data_warm/data_cold/data_frozen` 五个数据层角色。`node.roles: [data_hot]` 才是现代写法。旧资料讲的冷热分离靠 `node.attr` 自定义属性，原理相通但已被 tier 取代。
 

@@ -36,13 +36,13 @@
 
 | 组件 | 角色 | 一句话说明 |
 |-------|------|-----------|
-| **E = Elasticsearch | 存储与检索核心 | 存数据、建索引、搜索、聚合 |
-| **L = Logstash | 数据采集与转换 | input → filter → output 管道，从多种输入源写目的地 |
-| **K = Kibana | 可视化与管理 | 画仪表盘、Dev Tools、监控、Discover 探索数据 |
+| **E = Elasticsearch** | 存储与检索核心 | 存数据、建索引、搜索、聚合 |
+| **L = Logstash** | 数据采集与转换 | input → filter → output 管道，多源输入多目的地输出 |
+| **K = Kibana** | 可视化与管理 | 画仪表盘、Dev Tools、监控、Discover 探索数据 |
 
 ### 1.5.2 Beats 家族（后加入后称 Elastic Stack）
 
-Logstash 偏重但重，后推出更轻量的 **Beats** 做端采集器，直接采集后 ELK 升级为 **Elastic Stack**：
+Logstash 功能强但资源消耗大（JVM 进程、吃内存），后推出更轻量的 **Beats** 做端侧采集器（Go 编写，资源占用极低），Elastic 生态从「ELK」升级为 **Elastic Stack**：
 
 | Beat | 用途 | 场景 |
 |------|------|------|
@@ -55,12 +55,12 @@ Logstash 偏重但重，后推出更轻量的 **Beats** 做端采集器，直接
 
 典型数据流：**Beats（端采集）→ Logstash（过滤转换）→ Elasticsearch（存储检索）→ Kibana（可视化）**
 
-小场景也可以 Beats 直接写 ES（如 Filebeat → ES（无 Logstash。
+小场景 Beats 也可以直接写 ES（Filebeat → ES），省掉 Logstash。
 
 ### 1.5.3 Logstash 核心三段式
 
 - **Input（输入）**：从哪里读数据。常用：
-  - `file`：读文件（配合 sincedb 记录读取位置
+  - `file`：读文件（配合 sincedb 记录读取位置，断点续传）
   - `jdbc`：从数据库拉数据
   - `kafka`：从 Kafka 消费
   - `beats`：接收 Beats 发来的数据
@@ -88,7 +88,7 @@ Logstash 偏重但重，后推出更轻量的 **Beats** 做端采集器，直接
 | **Stack Monitoring** | 监控 ES 集群状态 |
 | **Management** | 索引模式、高级设置 |
 
-> 索引模式（Index Pattern）** 是 Kibana 访问 ES 索引的桥梁，配置后才能在 Discover/Visualize 里选索引。支持通配符如 `logstash-*`，按天滚动索引。
+> **索引模式（Index Pattern）** 是 Kibana 访问 ES 索引的桥梁，配置后才能在 Discover/Visualize 里选索引。支持通配符如 `logstash-*`，匹配按天滚动的多个索引。
 
 ---
 
@@ -927,6 +927,14 @@ GET _cat/aliases?v                     # 别名
 7. **滚动升级必须先禁分配**：资料常省略 `cluster.routing.allocation.enable=primaries` 这步。不暂停分配，重启节点时其分片会被迁走、起来后又迁回，造成无谓的 recovery 风暴，延长不可用时间。
 
 8. **searchable snapshot / frozen 层是省钱利器但资料少提**：frozen 层把冷数据放对象存储按需加载，存储成本降 90%+，是日志/APM 场景降本的关键，传统 ES 教程往往停在 cold 层不提 frozen。
+
+9. **「ELK 必须三个组件都用」是误区**：很多入门资料/视频画 ELK 架构时 Logstash 是必画的一环。实际生产中**大量场景是 Filebeat → ES 直接写**，不需要 Logstash——只有需要复杂过滤转换（grok/geoip/字段富化）时才加 Logstash。Logstash 资源消耗大、是单点瓶颈，能省则省。
+
+10. **「8.x 安全默认开启 = 不能关」是误解**：8.x 默认开安全是为了安全好，但生产中如果在内网且有其他访问控制（如网关鉴权），也可以通过配置 `xpack.security.enabled: false` 关掉。**但不建议关**，尤其是有公网暴露的情况。
+
+11. **「kNN 向量搜索完全替代向量数据库」是夸大宣传**：ES 8.x 的 kNN 确实支持向量检索，但和专门的向量数据库（Milvus/Pinecone/Weaviate）相比，在向量规模、检索性能、混合查询优化上还有差距。ES kNN 适合「已有 ES 集群、向量量不大、想顺便做向量搜索」的场景，大规模向量检索还是专业向量数据库更强。
+
+12. **Beats 不是只有 Filebeat**：很多教程只讲 Filebeat，但 Beats 家族有六七种，Metricbeat（指标）、Packetbeat（网络）、Heartbeat（拨测）、Auditbeat（审计）在运维监控场景各有用处，别一提到 Beats 就只想到 Filebeat。
 
 ---
 

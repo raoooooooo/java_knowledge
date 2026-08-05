@@ -1160,6 +1160,11 @@ GET _nodes/hot_threads?threads=10&interval=5s
 8. **「ILM 设了就高枕无忧」是误区**：ILM 常因 rollover 别名配置错误（没 `is_write_index: true`）、policy 条件没满足、某 step 报错而停滞。必须 `_ilm/explain` 监控状态，定期验证全流程。资料常只讲配置不讲排障。
 
 9. **跨大版本不能滚动升级**：7.x->8.x 不能滚动（有 breaking change），需先升到 7.x 最新、用 upgrade assistant 检查、reindex 兼容、再全停升级。资料常说「滚动升级」不讲大版本限制。
+10. **force_merge 不是越多越好，也不是越合并查询越快**：很多人误以为 segment 越少越快，有事没事就 force_merge 到 1 个 segment。实际上：① merge 非常耗 IO，生产会拖慢正常读写；② 少量 segment（如 3~5 个）对查询性能影响很小，完全没必要强行合并到 1 个；③ 热索引 force_merge 了也白搭，新 segment 还会不断生成。**force_merge 只适合只读/冷索引做存储优化**。
+11. **慢查询日志级别开太低会打爆磁盘**：教程常教「开 trace 级别看所有查询」。但 trace 级别所有查询都记，高 QPS 下日志量爆炸，分分钟把日志盘写满。生产建议**默认开 warn 级别（如 5s）**，排查问题时临时对单索引调低，排查完立刻调回去。
+12. **「_cat 命令就是用来开发用的，生产别看」是误解**：不少人觉得 _cat 是"玩具级"接口，生产要用 _nodes/stats 之类的 JSON API。实际上 _cat 系列是**生产运维排查的第一工具**——人眼可读、快速定位问题，比翻 JSON 高效得多。生产排查第一反应就应该是 _cat/health、_cat/nodes、_cat/shards 这三件套。
+13. **「refresh_interval: -1 就是永远不 refresh」要注意恢复**：批量导入时设 `-1` 关闭 refresh 很常见，但很多人**导入完忘了改回来**，导致数据一直搜不到。生产操作要记着恢复，或者用 transient 临时配置（集群重启后自动恢复），比 persistent 安全。
+14. **「磁盘只读锁会自动解除」是经典错误认知**：flood_stage 触发的 `read_only_allow_delete` 锁，**即使磁盘降到水位线以下也不会自动清除**，必须手动 PUT `index.blocks.read_only_allow_delete: null` 解锁。因这个误解导致业务长时间写不进的事故很多。（与第3条呼应，此处再次强调因为它是最常踩的坑）
 
 ---
 

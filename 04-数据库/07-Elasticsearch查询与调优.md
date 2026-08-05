@@ -677,3 +677,7 @@ SearchResponse<Product> resp = esClient.search(s -> s
 6. **「大量创建索引」≠「大量写入文档」**：中文「索引」既是名词（index 集合）又是动词（建倒排）。大量创建索引卡 Master 元数据串行队列（pending_tasks），大量写入文档卡 segment 生成与 merge（indexing 线程池）。两类风暴根因和解法都不同，排查时先分清是哪一类。
 7. **Transport Client 已过时**：很多教程/视频还在讲 TransportClient。**7.0 已弃用、8.0 移除**，生产用 RestHighLevelClient，8.x 推荐新 Java Client。面试别说错版本。
 8. **completion 自动补全不是万能**：completion 类型只支持前缀匹配，不支持中间/后缀匹配，也不支持模糊。要模糊纠错用 term/phrase suggester，别搞混。
+9. **Spring Data Elasticsearch 版本兼容性是巨坑**：视频常只讲用法不说版本对应。Spring Data ES 与 ES 版本**严格绑定**，Spring Boot 版本决定了 Spring Data ES 版本，也就决定了能连的 ES 大版本。版本不兼容会出现各种奇怪的类找不到、方法签名不匹配问题。使用前必须查官方版本对应表。
+10. **「NativeSearchQuery 是 Spring Data ES 标准查询方式」是过时认知**：Spring Data ES 4.0+ 之后，`NativeSearchQuery` 已被标记为 **deprecated**，官方推荐用 `CriteriaQuery`（简单查询）或通过 `ElasticsearchOperations.search()` 直接传 `Query` 对象。但由于 `NativeSearchQuery` 用的人太多，实际项目中仍大量使用，面试提一嘴「知道新的方式但项目里多用 NativeSearchQuery」比较稳。
+11. **highlight 的 `number_of_fragments=0` 不是「返回 0 个片段」**：很多人以为设 0 就是不返回高亮。实际 `0` 表示**返回整个字段内容作为一个片段**（而不是切成多个片段），对短字段很有用。真正想限制片段数设正整数，设 0 会把超长字段整个返回。
+12. **「Java 客户端和 ES 小版本不一致没关系」要谨慎**：客户端与服务端**大版本必须一致**（7.x 连 7.x），小版本越接近越好。小版本差太多可能遇到序列化不兼容、新特性不支持、bug 不一致等问题。生产建议客户端版本与服务端版本尽量一致。

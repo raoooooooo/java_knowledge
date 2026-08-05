@@ -184,10 +184,10 @@
 
 | 文件 | 核心内容 |
 |------|---------|
-| [01-HDFS.md](./12-大数据/01-HDFS.md) | HDFS分布式文件系统 |
-| [02-YARN.md](./12-大数据/02-YARN.md) | YARN资源调度框架 |
-| [03-Hadoop生态.md](./12-大数据/03-Hadoop生态.md) | Hadoop生态系统全景 |
-#### Flink 系列（`12-大数据/Flink/`，共13章）
+| [01-HDFS.md](./12-大数据/01-HDFS.md) | HDFS架构(NN/DN/SNN/HA/联邦)、读写流程与流水线副本、副本存放策略与机架感知、小文件问题与解决方案、安全模式、高级特性(回收站/快照/配额/均衡器)、shell命令速查、17道高频面试题 |
+| [02-YARN.md](./12-大数据/02-YARN.md) | YARN核心架构(RM/NM/AM/Container)、应用提交8步全流程、四大调度器(FIFO/Capacity/Fair/DRF)对比与选型、资源隔离、配置参数与常用命令、16道高频面试题 |
+| [03-Hadoop生态.md](./12-大数据/03-Hadoop生态.md) | Hadoop发展历程(1.x→2.x→3.x)、三大核心组件、生态全景9层架构图(MapReduce/Hive/HBase/Sqoop/Flume/ZK/调度/治理)、MapReduce原理与Shuffle、5组核心选型对比、21道经典面试题 |
+#### Flink 系列（`12-大数据/Flink/`，共14章）
 
 | 文件 | 核心内容 |
 |------|---------|
@@ -204,6 +204,7 @@
 | [11-Table-API与SQL.md](./12-大数据/Flink/11-Table-API与SQL.md) | 动态表与持续查询、更新查询vs追加查询、Append/Retract/Upsert编码、窗口TVF、UDF |
 | [12-Flink-CEP.md](./12-大数据/Flink/12-Flink-CEP.md) | 复杂事件处理、NFA状态机、next/followedBy/followedByAny、超时与迟到处理 |
 | [13-性能与调优.md](./12-大数据/Flink/13-性能与调优.md) | 反压Credit-Based流控、Flink内存模型、数据倾斜两阶段聚合、面试核心知识地图速记 |
+| [14-FlinkUI与故障排查.md](./12-大数据/Flink/14-FlinkUI与故障排查.md) | Web Dashboard面板详解、故障排查四步法、反压/CP失败/OOM/数据倾斜/TM丢失六大场景排查、指标速查表 |
 
 ---
 

@@ -310,16 +310,24 @@
 
 ---
 
-### 17 - 场景题
+### 17 - 面试经验
 
-> 跨主题、面试导向的场景题问答，聚焦"给定业务场景会出现什么问题、怎么解决、怎么选型"。与各知识点章节（01-java基础/04-数据库/05-分布式/06-中间件）及「09-系统设计与架构/经典场景设计」互补：那里讲原理与单点技术，本系列讲场景化的问题分析与方案权衡。
+> 跨主题、面试导向的场景题问答 + 真实面试场记。上半部分（01-04）按主题分类的场景题，聚焦"给定业务场景会出现什么问题、怎么解决、怎么选型"；下半部分（05+）为真实面试场记，每一场面试单独一个文件，还原面试现场问题、答题思路与复盘总结。与各知识点章节及「09-系统设计与架构/经典场景设计」互补：那里讲原理与单点技术，本系列讲场景化的问题分析与实战经验。
+
+#### 场景题系列
 
 | 文件 | 核心内容 |
 |------|---------|
-| [01-高并发与并发场景.md](./17-场景题/01-高并发与并发场景.md) | 库存扣减防超卖(DB行锁FOR UPDATE/乐观锁版本号/Redis预扣减+Lua原子/分布式锁)、秒杀系统(削峰MQ/限流/缓存预热/异步下单/分段锁)、订单超时取消(定时扫表/DelayQueue/RocketMQ延迟/时间轮)、限流(计数器/滑动窗口/令牌桶/漏桶 单机Sentinel vs 分布式Redis+Lua)、线程池实战(参数设置/突发流量/隔离/优雅关闭/禁用Executors)、分布式计数与排行榜(ZSet)、接口幂等(token/唯一索引/状态机/防重表)、精度问题(BigDecimal/LongAdder)、热点key、SimpleDateFormat线程安全、资料勘误(Redis预扣减必须Lua/乐观锁CAS/Redis过期通知不可靠) |
-| [02-缓存与消息队列场景.md](./17-场景题/02-缓存与消息队列场景.md) | 缓存穿透(布隆过滤器/空值)、击穿(互斥锁/逻辑过期)、雪崩(随机过期/熔断降级/多级缓存)、DB-缓存一致性(先更新DB再删缓存/延迟双删/为什么删而非更新)、热key大key、双写强一致(Cache Aside/afterCommit)；MQ消息丢失(三端保障-生产确认/持久化/手动ACK)、重复消费(幂等)、顺序性(同key同队列)、堆积(扩消费者/临时Topic/批量)、延迟消息(RocketMQ延迟等级/死信)、可靠投递；资料勘误(推荐先更新DB再删缓存/延迟双删原理/布隆无漏判有误判/顺序仅同队列内/手动ACK配幂等/Kafka单partition天然有序vs RocketMQ锁queue) |
-| [03-分布式与数据库场景.md](./17-场景题/03-分布式与数据库场景.md) | 分布式锁实现与选型(Redis setnx+NX PX原子加锁+Lua释放校验value/Redlock争议/Zookeeper临时顺序节点CP/数据库唯一索引)、分布式锁三大坑(锁过期业务没完-Redisson看门狗30s租约10s续期仅未指定leaseTime生效/释放误删-UUID+Lua原子/主从切换丢锁)、分布式事务选型(2PC-XA强一致阻塞/Seata AT全局串行/TCC空回滚悬挂幂等/SAGA补偿/本地消息表/可靠消息最终一致/CAP与BASE)、分布式ID(UUID无序不做主键/雪花算法时钟回拨/号段模式Leaf/Redis incr)、分库分表(何时分-垂直水平-分片键-跨库Join聚合分页难题)、分库分表后全局唯一ID(雪花算法时钟回拨处理)、MySQL死锁排查(show engine innodb status/行锁交叉更新/间隙锁RR级别)、慢SQL优化(explain type-key-rows/索引失效/回表/覆盖索引/大分页游标WHERE id>last_id/延迟关联)、千万级大表优化(索引-冷热分离-归档-读写分离-分库分表/分批DELETE/count计数表)、高并发改同一行(乐观锁版本号vs悲观锁FOR UPDATE会阻塞vs分布式锁vs条件CAS WHERE stock>0)、主从延迟读旧数据(强制走主库/缓存过渡/半同步仍异步回放)、连接池配置(HikariCP公式core*2+spindle/maxLifetime小于wait_timeout/minimumIdle=maximumPoolSize)、资料勘误(setnx+expire非原子/看门狗leaseTime条件/Redlock争议/间隙锁RC消除/深分页游标/UUID主键页分裂/连接池非越大越好等) |
-| [04-系统设计实战.md](./17-场景题/04-系统设计实战.md) | 系统设计题六步法套路(STAR)、短链(302重定向/Base62/发号器)、Feed流(推/拉/推拉结合)、IM(读写扩散/消息有序/可靠投递/已读未读)、抢红包(二倍均值法)、排行榜(ZSet/分桶)、点赞(去重/计数/异步落库)、秒杀(分层防护)、电商订单(状态机/分布式事务/超时取消)、附近的人(Redis GEO/Geohash/Haversine)、资料勘误(301vs302/推模式适用场景/写扩散爆炸/二倍均值不均匀/ZSet分桶/Redis过期通知不可靠) |
+| [01-高并发与并发场景.md](./17-面试经验/01-高并发与并发场景.md) | 库存扣减防超卖(DB行锁FOR UPDATE/乐观锁版本号/Redis预扣减+Lua原子/分布式锁)、秒杀系统(削峰MQ/限流/缓存预热/异步下单/分段锁)、订单超时取消(定时扫表/DelayQueue/RocketMQ延迟/时间轮)、限流(计数器/滑动窗口/令牌桶/漏桶 单机Sentinel vs 分布式Redis+Lua)、线程池实战(参数设置/突发流量/隔离/优雅关闭/禁用Executors)、分布式计数与排行榜(ZSet)、接口幂等(token/唯一索引/状态机/防重表)、精度问题(BigDecimal/LongAdder)、热点key、SimpleDateFormat线程安全、资料勘误(Redis预扣减必须Lua/乐观锁CAS/Redis过期通知不可靠) |
+| [02-缓存与消息队列场景.md](./17-面试经验/02-缓存与消息队列场景.md) | 缓存穿透(布隆过滤器/空值)、击穿(互斥锁/逻辑过期)、雪崩(随机过期/熔断降级/多级缓存)、DB-缓存一致性(先更新DB再删缓存/延迟双删/为什么删而非更新)、热key大key、双写强一致(Cache Aside/afterCommit)；MQ消息丢失(三端保障-生产确认/持久化/手动ACK)、重复消费(幂等)、顺序性(同key同队列)、堆积(扩消费者/临时Topic/批量)、延迟消息(RocketMQ延迟等级/死信)、可靠投递；资料勘误(推荐先更新DB再删缓存/延迟双删原理/布隆无漏判有误判/顺序仅同队列内/手动ACK配幂等/Kafka单partition天然有序vs RocketMQ锁queue) |
+| [03-分布式与数据库场景.md](./17-面试经验/03-分布式与数据库场景.md) | 分布式锁实现与选型(Redis setnx+NX PX原子加锁+Lua释放校验value/Redlock争议/Zookeeper临时顺序节点CP/数据库唯一索引)、分布式锁三大坑(锁过期业务没完-Redisson看门狗30s租约10s续期仅未指定leaseTime生效/释放误删-UUID+Lua原子/主从切换丢锁)、分布式事务选型(2PC-XA强一致阻塞/Seata AT全局串行/TCC空回滚悬挂幂等/SAGA补偿/本地消息表/可靠消息最终一致/CAP与BASE)、分布式ID(UUID无序不做主键/雪花算法时钟回拨/号段模式Leaf/Redis incr)、分库分表(何时分-垂直水平-分片键-跨库Join聚合分页难题)、分库分表后全局唯一ID(雪花算法时钟回拨处理)、MySQL死锁排查(show engine innodb status/行锁交叉更新/间隙锁RR级别)、慢SQL优化(explain type-key-rows/索引失效/回表/覆盖索引/大分页游标WHERE id>last_id/延迟关联)、千万级大表优化(索引-冷热分离-归档-读写分离-分库分表/分批DELETE/count计数表)、高并发改同一行(乐观锁版本号vs悲观锁FOR UPDATE会阻塞vs分布式锁vs条件CAS WHERE stock>0)、主从延迟读旧数据(强制走主库/缓存过渡/半同步仍异步回放)、连接池配置(HikariCP公式core*2+spindle/maxLifetime小于wait_timeout/minimumIdle=maximumPoolSize)、资料勘误(setnx+expire非原子/看门狗leaseTime条件/Redlock争议/间隙锁RC消除/深分页游标/UUID主键页分裂/连接池非越大越好等) |
+| [04-系统设计实战.md](./17-面试经验/04-系统设计实战.md) | 系统设计题六步法套路(STAR)、短链(302重定向/Base62/发号器)、Feed流(推/拉/推拉结合)、IM(读写扩散/消息有序/可靠投递/已读未读)、抢红包(二倍均值法)、排行榜(ZSet/分桶)、点赞(去重/计数/异步落库)、秒杀(分层防护)、电商订单(状态机/分布式事务/超时取消)、附近的人(Redis GEO/Geohash/Haversine)、资料勘误(301vs302/推模式适用场景/写扩散爆炸/二倍均值不均匀/ZSet分桶/Redis过期通知不可靠) |
+
+#### 真实面试场记
+
+| 文件 | 核心内容 |
+|------|---------|
+| [05-腾讯微信-后端开发-一面.md](./17-面试经验/05-腾讯微信-后端开发-一面.md) | 40分钟40题连环炮全栈面经：MCP与AI Agent(协议/Skills/与Function Calling区别)、Linux基础(进程线程协程/内存布局/malloc底层)、IPC(共享内存优缺点)、网络(IO多路复用/OSI/TCP可靠/粘包/三次握手四次挥手/TIME_WAIT/输入URL全流程/ARP)、MySQL(数据类型/存储引擎/B+树索引/事务ACID/隔离级别与MVCC/主从同步/高可用)、安全(CSRF/SQL注入)、Java与容器(JVM内存与GC/Docker三大机制/K8s)、大模型(QKV注意力/SSE/HTTP2优化)、Redis(数据结构/SDS/ziplist-listpack)、面试复盘与资料勘误7条 |
 
 ### 18 - 面试技巧与职业规划
 

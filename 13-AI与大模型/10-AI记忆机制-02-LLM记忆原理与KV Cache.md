@@ -268,13 +268,13 @@ KV_Cache_Size = 2 × 32 × 131072 × 4096 × 2 bytes
 ```mermaid
 graph LR
     subgraph why_kv_cache["为什么需要KV Cache"]
-        Speed[推理速度<br/>从 O(N²) → O(N)]
-        Memory[显存效率<br/>避免重复存储中间结果]
-        Feasibility[可行性<br/>长上下文才可能实现]
+        speed_node["推理速度<br/>从 O(N^2) 到 O(N)"]
+        mem_node["显存效率<br/>避免重复存储中间结果"]
+        feas_node["可行性<br/>长上下文才可能实现"]
     end
 
-    Speed -->|基础| Feasibility
-    Memory -->|关键| Feasibility
+    speed_node -->|"基础"| feas_node
+    mem_node -->|"关键"| feas_node
 ```
 
 #### 4.1.1 推理速度：从不可用到可用

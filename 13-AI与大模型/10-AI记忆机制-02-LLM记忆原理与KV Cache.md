@@ -216,7 +216,158 @@ sequenceDiagram
 
 总计算量从 **O(N²) 降到 O(N)**——这就是为什么 KV Cache 是 LLM 推理的**基础标配**，没有它长上下文根本跑不动。
 
-### 3.3 一个具体的数值例子（以 LLaMA-2 7B 为例）
+### 3.3 KV Cache 的生命周期：Prefill 与 Decode ★
+
+这是理解 KV Cache 最关键的一节——很多人学了很久 KV Cache，却说不清它到底「活在什么时候」。
+
+#### 3.3.1 先澄清：什么是「一次推理」
+
+日常说的「一次推理」其实有两层含义，容易混淆：
+
+| 说法 | 含义 | 技术术语 |
+|------|------|---------|
+| 「发一句话让模型回复」 | 用户发一个 prompt，模型生成一段完整回答 | **一次请求 / 一次生成任务** |
+| 「模型跑一次前向传播」 | 模型跑一遍 forward，产出一个 Token | **一步前向推理 / 一个 Decode Step** |
+
+KV Cache 就是在**同一请求的多步 Decode 之间**被复用的缓存。
+
+#### 3.3.2 一次请求的两个阶段
+
+假设用户输入：**「请介绍一下人工智能」**（10 个 Token），模型生成 50 个 Token 的回答。
+
+整个过程分两个截然不同的阶段：
+
+```mermaid
+graph LR
+    subgraph request_lifecycle["一次请求的生命周期"]
+        direction TB
+        subgraph prefill_phase["阶段一：Prefill（预填充）"]
+            P1["输入：10个Token 的 prompt"]
+            P2["一次性算出全部 10 个 Token 的 K/V"]
+            P3["产出第一份 KV Cache（10个）"]
+            P4["输出第 1 个生成 Token"]
+            P1 --> P2 --> P3 --> P4
+        end
+
+        subgraph decode_phase["阶段二：Decode（逐Token生成）"]
+            D1["第 1 步：生成 Token 1<br/>(读10个KV，追加1个)"]
+            D2["第 2 步：生成 Token 2<br/>(读11个KV，追加1个)"]
+            D3["..."]
+            D4["第 50 步：生成结束符<br/>(读59个KV，停止)"]
+            D1 --> D2 --> D3 --> D4
+        end
+
+        prefill_phase --> decode_phase
+    end
+
+    style prefill_phase fill:#e3f2fd
+    style decode_phase fill:#fff3e0
+```
+
+**阶段一：Prefill（预填充）**
+
+- 输入：用户的整段 prompt（N 个 Token）
+- 做什么：一次性把这 N 个 Token 的 K/V 全都算出来
+- 计算特点：**计算密集型（Compute-Bound）**，时间复杂度 O(N²)
+  - 因为每个 Token 都要和其他所有 Token 做自注意力
+- 产出：
+  - 第 1 个生成 Token 的预测结果
+  - 一份包含 N 个 Token 的 KV Cache
+
+> 💡 **为什么 Prefill 不直接生成所有 Token？** 因为自回归模型的特性——它只能看到「前面已生成的内容」来预测下一个，所以只能一个一个生成。Prefill 只是把 prompt 的 K/V 先「预填充」进缓存，然后从第一个 Token 开始一步一步生成。
+
+**阶段二：Decode（解码 / 逐 Token 生成）**
+
+每生成一个 Token 就是一步 Decode，每步都一样：
+
+1. 拿上一步生成的 Token（**1 个**），计算它的 Q、K、V
+2. 从 KV Cache 里读出**所有历史**的 K/V
+3. 用当前 Q 和所有历史 K 做注意力 → 得到输出向量
+4. 把新的 K/V **追加**到 KV Cache 末尾
+5. 通过 LM Head 预测下一个 Token
+
+- 计算特点：**内存带宽密集型（Memory-Bound）**，每步时间复杂度 O(N)
+  - 计算量很小（只有 1 个新 Token），但要读整个 KV Cache（N 个）
+  - 上下文越长，读数据的时间占比越高
+
+#### 3.3.3 Prefill vs Decode 对比
+
+| 维度 | Prefill 阶段 | Decode 阶段 |
+|------|-------------|-------------|
+| **输入 Token 数** | 一次输入 N 个（全部 prompt） | 每次输入 1 个（上一步的输出） |
+| **计算量** | O(N²)，计算量大 | O(N) 每步，计算量小 |
+| **瓶颈类型** | 计算瓶颈（Compute-Bound） | 内存带宽瓶颈（Memory-Bound） |
+| **KV Cache 操作** | 创建 + 写入（批量） | 读取 + 追加（逐个） |
+| **耗时占比** | prompt 长时占比高 | 生成 Token 多时占比高 |
+| **步数** | 只有 1 步 | M 步（M = 生成的 Token 数） |
+
+> 🔑 **面试金句**：Prefill 是「算得多、写得多」，Decode 是「读得多、算得少」。KV Cache 在 Prefill 阶段被创建，在 Decode 阶段被反复读取和追加——这就是它的完整生命周期。
+
+#### 3.3.4 KV Cache 的完整生命周期
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant S as 服务端
+    participant K as KV Cache
+    participant G as GPU
+
+    U->>S: 发起请求（prompt）
+    S->>G: Prefill 阶段
+    G->>K: 创建并写入 N 个 K/V
+    G-->>S: 第 1 个生成 Token
+    S-->>U: 流式返回第 1 个 Token
+
+    loop 每生成一个 Token（Decode 阶段）
+        G->>K: 读取全部历史 K/V
+        G->>G: 计算当前 Token 的 Q/K/V
+        G->>K: 追加新的 K/V
+        G-->>S: 下一个生成 Token
+        S-->>U: 流式返回
+    end
+
+    Note over G,K: 遇到 &lt;END&gt; 结束符，停止生成
+    S->>K: 释放 KV Cache（显存回收）
+    S-->>U: 请求结束
+```
+
+**生命周期总结**：
+- **创建**：Prefill 阶段，写入 prompt 所有 Token 的 K/V
+- **使用**：Decode 阶段的每一步，先读后写（读所有历史，追加新的一对）
+- **增长**：每生成一个 Token，KV Cache 就多一对 K/V，线性增长
+- **销毁**：请求结束（遇到结束符或用户主动停止），释放显存
+
+#### 3.3.5 延伸：多轮对话中的 KV Cache
+
+上面说的是「一次请求 = 一次释放」，但实际对话场景往往是多轮的：
+
+```
+用户：你好
+AI：你好！我是 AI 助手。
+用户：你是谁？
+AI：我是一个大语言模型...
+```
+
+**方案一：朴素实现（每轮重算）**
+
+每一轮都把**全部历史对话**拼成新的 prompt，从头 Prefill：
+- 第 2 轮要重新算「你好 / 你好！我是AI助手 / 你是谁？」所有 K/V
+- 优点：简单，用完就释放
+- 缺点：浪费计算，对话越长越慢
+
+**方案二：优化实现（跨轮保留）** ★ 主流方案
+
+服务端把上一轮的 KV Cache **保留在显存中**（和 session 绑定），新一轮只需要：
+1. Prefill 用户新消息那几个 Token 的 K/V
+2. 拼到上一轮的 KV Cache 后面
+3. 接着 Decode 生成回答
+
+- 优点：快很多，避免重复计算
+- 缺点：显存持续占用，需要管理会话生命周期
+
+> 💡 这就是为什么「上下文窗口」既是能力上限，也是显存成本上限。多轮对话中 KV Cache 只增不减，直到达到窗口上限——这时就需要滑动窗口、摘要压缩等策略来腾空间。
+
+### 3.4 一个具体的数值例子（以 LLaMA-2 7B 为例）
 
 让我们用真实的模型参数来算一算，建立直观感受。
 
@@ -777,7 +928,19 @@ graph LR
 
 > KV Cache 是 LLM 推理的基础优化：把前面 Token 已经算好的 K/V 缓存起来，避免每步重算——把时间复杂度从 O(N²) 降到 O(N)。没有它，长上下文推理根本不可行。
 
-### 8.3 KV Cache 大小计算
+### 8.3 Prefill 与 Decode 阶段对比
+
+| 维度 | Prefill 阶段 | Decode 阶段 |
+|------|-------------|-------------|
+| 输入 | 一次 N 个 Token（全部 prompt） | 每次 1 个 Token（上一步输出） |
+| 计算复杂度 | O(N²) | O(N) 每步 |
+| 瓶颈类型 | 计算密集型（Compute-Bound） | 内存带宽密集型（Memory-Bound） |
+| KV Cache 操作 | 创建 + 批量写入 | 读取全部 + 追加 1 个 |
+| 步数 | 1 步 | M 步（M = 生成的 Token 数） |
+
+> 面试金句：Prefill 是「算得多、写得多」，Decode 是「读得多、算得少」。KV Cache 在 Prefill 被创建，在 Decode 的每一步被读取和追加——这就是它的完整生命周期。
+
+### 8.4 KV Cache 大小计算
 
 ```
 KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
@@ -789,7 +952,7 @@ KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
 
 例子：LLaMA-2 7B + 128K + FP16 = 2 × 32 × 131072 × 4096 × 2 ≈ 64 GB
 
-### 8.4 单机优化技术速记
+### 8.5 单机优化技术速记
 
 | 技术 | 核心思想 | 效果 |
 |------|---------|------|
@@ -799,7 +962,7 @@ KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
 | Prefix Cache | 共享公共前缀 KV | 前缀部分省 N 倍 |
 | 滑动窗口 | 只保留最近的 Token | 显存固定 |
 
-### 8.5 分布式优化技术速记
+### 8.6 分布式优化技术速记
 
 | 技术 | 切分维度 | 显存效果 | 通信 |
 |------|---------|---------|------|
@@ -807,7 +970,7 @@ KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
 | 流水并行（PP） | 按层 | 按层数比例降 | 较小（层间） |
 | 上下文并行（CP） | 按序列长度 | 线性降低 | 大（注意力需要全局 KV） |
 
-### 8.6 高频面试题速答
+### 8.7 高频面试题速答
 
 **Q1：LLM 的「上下文记忆」到底是什么？它是怎么记住前面说过的话的？**
 
@@ -821,7 +984,14 @@ KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
 
 > PagedAttention 是 vLLM 的核心技术，借鉴操作系统的虚拟内存分页思想：把 KV Cache 分成固定大小的页（Block），通过页表逻辑上连续、物理上不连续。好处是：① 几乎消除外部碎片（固定大小的页可以任意复用）；② 显存利用率从 40% 左右提升到 95% 以上；③ 支持动态扩缩容和灵活共享。同样的显存能服务更多并发用户。
 
-**Q4：张量并行和上下文并行有什么区别？**
+**Q4：Prefill 和 Decode 阶段有什么区别？KV Cache 在其中分别起什么作用？**
+
+> 一次生成请求分两个阶段：
+> - **Prefill（预填充）**：一次性输入全部 prompt（N 个 Token），一次性算出所有 K/V，创建 KV Cache。计算密集型，时间复杂度 O(N²)。
+> - **Decode（解码）**：每次输入 1 个新 Token，读 KV Cache 里所有历史 K/V，算当前 Token 的 Q/K/V，把新的 K/V 追加进去。内存带宽密集型，每步 O(N)。
+> KV Cache 在 Prefill 阶段被创建和批量写入，在 Decode 阶段被反复读取和逐个追加——没有它，Decode 每步都要重算全部历史 K/V，长上下文根本跑不动。
+
+**Q5：张量并行和上下文并行有什么区别？**
 
 > 都是分布式 KV Cache 方案，但切分维度不同：
 > - **张量并行**按「注意力头」切分——每张卡存一部分头的 KV。好处是计算也能并行，缺点是每步注意力需要 AllReduce 通信，对带宽要求高。
@@ -844,4 +1014,6 @@ KV_Cache_Size = 2 × L × N × d_model × sizeof(dtype)
 
 5. **「上下文并行可以无限扩展上下文长度」** —— 理论上可以，但实际受限于通信开销。卡越多，通信占比越高，加速比会递减。而且超长上下文不仅是存储问题，还有注意力计算本身的 O(N²) 问题（虽然 KV Cache 把推理每步降到了 O(N)，但 Prefill 阶段仍然是 O(N²)）。1M 上下文的 Prefill 本身就很慢。
 
-6. **数值例子的参数假设** —— 本章中的 KV Cache 计算公式和数值例子基于标准 Transformer 解码器架构（LLaMA 风格）。不同模型的具体参数（层数、隐藏维度、头数、是否用 GQA/MQA）不同，实际数值会有差异，但公式的形式是通用的。面试时可以用这个公式来推导和估算，展现你的工程思维。
+6. **「KV Cache 每一步都在做 O(N²) 的计算」** —— 错。要分阶段看：Prefill 阶段是 O(N²)（所有 Token 之间互相做注意力），但 Decode 阶段每步是 O(N)（只有 1 个新 Token 的 Q 对所有历史 K 做注意力）。这也是 KV Cache 的核心价值——把 Decode 从 O(N²) 降到了 O(N)。很多人学完自注意力公式后以为每步都是 O(N²)，这是最常见的误区之一。
+
+7. **数值例子的参数假设** —— 本章中的 KV Cache 计算公式和数值例子基于标准 Transformer 解码器架构（LLaMA 风格）。不同模型的具体参数（层数、隐藏维度、头数、是否用 GQA/MQA）不同，实际数值会有差异，但公式的形式是通用的。面试时可以用这个公式来推导和估算，展现你的工程思维。
